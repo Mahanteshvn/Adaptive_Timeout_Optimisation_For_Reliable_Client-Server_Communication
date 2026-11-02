@@ -1,0 +1,2162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Adaptive Timeout Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky header with two views; controls column on the left, a stage
+   (packet animation) and live instrument panels on the right. */
+:root {
+  --bg: #f3f2ee;
+  --surface: #fcfcfa;
+  --surface-2: #ecebe6;
+  --border: #dedcd5;
+  --text: #121820;
+  --text-2: #4f5761;
+  --text-3: #858b93;
+  --grid: #e6e5e0;
+  --axis: #bab8b1;
+  --rtt: #9a9a94;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #e09a00;
+  --accent: #1f5fae;
+  --accent-soft: rgba(42, 120, 214, .11);
+  --good: #0f8a4b;
+  --bad: #c53b3a;
+  --warn: #b9601f;
+  --band: rgba(110, 108, 100, .10);
+  --wire: #c9c7bf;
+  --node: #ffffff;
+  --shadow: 0 1px 2px rgba(18, 24, 32, .05), 0 2px 10px rgba(18, 24, 32, .04);
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111416; --surface: #181c1f; --surface-2: #22272b; --border: #2f353a;
+    --text: #eef0f1; --text-2: #b9c0c6; --text-3: #8a9299;
+    --grid: #262b2f; --axis: #485056; --rtt: #7a8086;
+    --s1: #4a92ea; --s2: #e06a37; --s3: #22a777; --s4: #d39a10;
+    --accent: #6aa8f0; --accent-soft: rgba(74, 146, 234, .16);
+    --good: #43c283; --bad: #ec6b6a; --warn: #e48b48; --band: rgba(210, 210, 200, .07);
+    --wire: #3b4247; --node: #1f2428; --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111416; --surface: #181c1f; --surface-2: #22272b; --border: #2f353a;
+  --text: #eef0f1; --text-2: #b9c0c6; --text-3: #8a9299;
+  --grid: #262b2f; --axis: #485056; --rtt: #7a8086;
+  --s1: #4a92ea; --s2: #e06a37; --s3: #22a777; --s4: #d39a10;
+  --accent: #6aa8f0; --accent-soft: rgba(74, 146, 234, .16);
+  --good: #43c283; --bad: #ec6b6a; --warn: #e48b48; --band: rgba(210, 210, 200, .07);
+  --wire: #3b4247; --node: #1f2428; --shadow: none;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); }
+button, input, select { font: inherit; color: inherit; }
+code, .mono { font-family: var(--mono); font-size: .92em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inner { max-width: 1360px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* ---------- header ---------- */
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 12px; padding-top: 12px; flex-wrap: wrap; }
+.brand-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--s1); display: grid; place-items: center; color: #fff; flex: none; }
+.brand h1 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
+.brand p { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.brand .spacer { flex: 1; }
+.ghost { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 10px; cursor: pointer; color: var(--text-2); font-size: 12.5px; }
+nav.tabs { display: flex; gap: 2px; margin-top: 8px; overflow-x: auto; }
+nav.tabs button { border: 0; background: none; padding: 9px 14px 11px; cursor: pointer; color: var(--text-2); border-bottom: 2px solid transparent; white-space: nowrap; font-weight: 500; }
+nav.tabs button:hover { color: var(--text); }
+nav.tabs button.on { color: var(--text); border-bottom-color: var(--s1); }
+
+main { padding-block: 20px 60px; }
+section.view { display: none; }
+section.view.on { display: block; }
+
+/* ---------- generic ---------- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+.pad { padding: 16px 18px; }
+h2 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.015em; text-wrap: balance; }
+h3 { font-size: 14.5px; margin: 0 0 8px; }
+.lead { color: var(--text-2); margin: 0 0 16px; max-width: 860px; }
+.muted { color: var(--text-2); }
+.small { font-size: 12.5px; }
+.layout { display: grid; grid-template-columns: 292px minmax(0, 1fr); gap: 18px; align-items: start; }
+.stack > * + * { margin-top: 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 500; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--s1); border-color: var(--s1); color: #fff; min-width: 108px; }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn:disabled { opacity: .5; cursor: default; }
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+
+/* ---------- controls ---------- */
+.controls { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 112px); }
+.ctl { margin: 12px 0; }
+.ctl label { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--text-2); margin-bottom: 3px; gap: 8px; }
+.ctl label b { color: var(--text); font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+.ctl input[type=range] { width: 100%; accent-color: var(--s1); }
+.hint { font-size: 11.5px; color: var(--text-3); margin-top: 3px; }
+.seg { display: flex; background: var(--surface-2); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button { flex: 1; border: 0; background: none; padding: 6px 4px; border-radius: 7px; cursor: pointer; color: var(--text-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .1); }
+.checks label { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer; }
+.divider { border-top: 1px solid var(--border); margin: 14px 0; }
+.inline-inputs { display: flex; gap: 8px; }
+.inline-inputs .ctl { flex: 1; margin: 6px 0; min-width: 0; }
+input[type=number] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-family: var(--mono); font-size: 13px; }
+.swatch { width: 18px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
+
+/* ---------- playback bar ---------- */
+.playbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 16px; }
+.playbar .speed { display: flex; align-items: center; gap: 8px; }
+.playbar .speed .seg button { flex: none; padding: 5px 9px; font-family: var(--mono); font-size: 12px; }
+.clock { margin-left: auto; display: flex; gap: 16px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.clock b { font-family: var(--mono); font-size: 18px; font-weight: 600; }
+.clock span { color: var(--text-3); font-size: 12px; }
+.progress { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; flex-basis: 100%; }
+.progress i { display: block; height: 100%; width: 0; background: var(--s1); }
+
+.callout { border-left: 3px solid var(--s1); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 13.5px; }
+
+/* ---------- stage (packet animation) ---------- */
+.stage-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.pkt-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text-2); }
+.pkt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pkt { display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 9px; color: #fff; line-height: 1.5; }
+.pkt.ack { background: var(--text-2); color: var(--surface); }
+.pkt.rs { background: transparent; color: var(--text); border: 1.5px dashed var(--text-2); }
+.pkt.dup { background: var(--surface-2); color: var(--text-3); }
+.x-mark { color: var(--bad); font-weight: 700; }
+canvas#stage { display: block; width: 100%; border-radius: 8px; background: var(--surface); }
+.log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
+select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.log-wrap { overflow-x: auto; }
+table.log { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+table.log td { padding: 3px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.log td.t { font-family: var(--mono); color: var(--text-3); width: 1%; }
+table.log td.k { width: 1%; }
+.tag { display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.tag.lost, .tag.fail { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.tag.timeout { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.tag.ack, .tag.done { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.tag.resend { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- scorecard ---------- */
+.score-wrap { overflow-x: auto; }
+.score { width: 100%; border-collapse: collapse; font-size: 13px; }
+.score th { text-align: left; font-weight: 500; color: var(--text-2); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.score td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.score tr:last-child td { border-bottom: 0; }
+.score td.num { font-family: var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.score .best { color: var(--good); font-weight: 600; }
+.score .worst { color: var(--bad); }
+.strat { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+
+/* ---------- charts ---------- */
+.chart { position: relative; min-width: 0; }
+.chart > svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .ctitle { font-weight: 600; font-size: 13.5px; margin: 0 0 2px; }
+.chart .csub { color: var(--text-2); font-size: 12px; margin: 0 0 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--text-2); margin: 4px 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { display: inline-block; flex: none; }
+.legend .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rtt); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .12); white-space: nowrap; z-index: 5; display: none; }
+.tip .th { font-weight: 600; margin-bottom: 4px; }
+.tip .tr { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .tr .v { font-family: var(--mono); color: var(--text); }
+.tip .tr .k { color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.metric-toggle { margin-bottom: 10px; display: inline-flex; flex-wrap: wrap; }
+.metric-toggle button { flex: none; padding: 6px 12px; }
+
+/* ---------- experiments ---------- */
+.exp-list button { display: block; width: 100%; text-align: left; border: 1px solid transparent; background: none; padding: 10px 12px; border-radius: 9px; cursor: pointer; margin-bottom: 4px; }
+.exp-list button:hover { background: var(--surface-2); }
+.exp-list button.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--s1) 30%, transparent); }
+.exp-list .t { font-weight: 600; font-size: 13.5px; display: block; }
+.exp-list .d { color: var(--text-2); font-size: 12px; display: block; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--s1); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .controls { position: static; }
+}
+@media (max-width: 640px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .clock { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* ---------- micro-interactions (shared) ---------- */
+.btn, .seg button, .exp-list button, nav.tabs button, .ghost, .chip, .x-nets button, .x-rows button {
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .12s ease;
+}
+.btn:active, .seg button:active, .ghost:active, .chip:active, .x-nets button:active, .x-rows button:active { transform: scale(.97); }
+.seg button:hover:not(.on) { color: var(--text); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.exp-list button:hover { transform: translateX(2px); }
+.btn.primary:active { filter: brightness(.95); }
+
+/* ---------- network explorer ---------- */
+.explorer[hidden] { display: none; }
+.x-head { display: flex; flex-wrap: wrap; gap: 12px 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.x-head-t { flex: 1 1 340px; min-width: 0; }
+.x-head h3 { font-size: 17px; margin: 2px 0 2px; letter-spacing: -.01em; }
+.x-ctrls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.x-ctrls .seg button { flex: none; padding: 5px 10px; font-family: var(--mono); font-size: 12px; }
+.x-nets { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.x-nets button { position: relative; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 9px 11px 8px; cursor: pointer; min-width: 0; }
+.x-nets button:hover { border-color: color-mix(in srgb, var(--s1) 45%, var(--border)); box-shadow: 0 3px 10px rgba(0, 0, 0, .06); transform: translateY(-1px); }
+.x-nets button.on { border-color: var(--s1); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--s1); }
+.x-nets .t { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-nets .r { display: block; font-size: 11.5px; color: var(--accent); }
+.x-nets .d { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+.x-strat { margin-bottom: 10px; flex-wrap: wrap; }
+.x-strat button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; }
+.x-strat button.on { box-shadow: 0 1px 2px rgba(0, 0, 0, .1), inset 0 -2px 0 var(--c); }
+.x-canvas { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--surface); }
+canvas#xScene { display: block; width: 100%; height: 360px; cursor: pointer; }
+canvas#xScene:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.x-tip { position: absolute; z-index: 3; pointer-events: none; max-width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.4; box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
+.x-tip .bad, .x-counters .bad { color: var(--bad); }
+.x-counters .warn { color: var(--warn); }
+.x-done { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(2px); animation: fadeIn .25s ease; }
+.x-done[hidden], .x-fallback[hidden], .x-tip[hidden] { display: none; }
+.x-done-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; text-align: center; max-width: 340px; box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
+.x-done-card p { margin: 6px 0 12px; color: var(--text-2); font-size: 13px; }
+.x-fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: var(--text-2); background: var(--surface-2); }
+@keyframes fadeIn { from { opacity: 0; } }
+.x-counters { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; margin-top: 10px; background: var(--border); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.x-counters div { background: var(--surface); padding: 6px 9px; min-width: 0; }
+.x-counters span { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-counters b { font-family: var(--mono); font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.x-foot { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; align-items: center; margin-top: 10px; }
+
+/* hero: the single dominant number */
+.x-hero { background: var(--surface-2); border-radius: 12px; padding: 16px 16px 14px; min-height: 360px; }
+.x-big { display: flex; align-items: baseline; gap: 6px; line-height: 1; margin: 8px 0 6px; color: var(--c); }
+.x-big span { font-size: 60px; font-weight: 700; letter-spacing: -.04em; font-variant-numeric: tabular-nums; animation: pop .35s ease; }
+.x-big small { font-size: 18px; font-weight: 600; color: var(--text-2); }
+@keyframes pop { from { opacity: .3; transform: translateY(4px); } }
+.x-sub { color: var(--text-2); font-size: 13px; }
+.x-verdict { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 99px; font-weight: 600; font-size: 12.5px; }
+.x-verdict.good { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.x-verdict.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.x-verdict.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.x-why { font-size: 12.5px; color: var(--text-2); margin: 8px 0 12px; }
+.x-mini { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 12px; }
+.x-mini div { background: var(--surface); border-radius: 8px; padding: 6px 8px; }
+.x-mini b { display: block; font-family: var(--mono); font-size: 14px; }
+.x-mini span { font-size: 10.5px; color: var(--text-3); }
+.x-rows { display: grid; gap: 4px; margin-bottom: 8px; }
+.x-rows button { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid transparent; background: none; border-radius: 8px; padding: 6px 8px; cursor: pointer; text-align: left; font-size: 12px; }
+.x-rows button:hover { background: var(--surface); }
+.x-rows button.on { background: var(--surface); border-color: var(--c); }
+.x-rows .nm { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-rows .bar { height: 6px; background: color-mix(in srgb, var(--text-3) 18%, transparent); border-radius: 3px; overflow: hidden; }
+.x-rows .bar i { display: block; height: 100%; background: var(--c); border-radius: 3px; transition: width .4s ease; }
+.x-rows .v { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+.x-empty { display: flex; gap: 10px; align-items: center; color: var(--text-2); padding: 20px 4px; }
+
+/* chart tools: metric switch + strategy chips */
+.chart-tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
+.chart-tools .metric-toggle { margin-bottom: 0; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chips[hidden], .metric-toggle[hidden] { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface); border-radius: 99px; padding: 4px 11px 4px 8px; cursor: pointer; font-size: 12px; color: var(--text-3); }
+.chip i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--c); background: transparent; transition: background-color .15s ease; }
+.chip.on { color: var(--text); border-color: color-mix(in srgb, var(--c) 55%, var(--border)); }
+.chip.on i { background: var(--c); }
+.chip:hover { border-color: var(--c); }
+.empty-state { text-align: center; padding: 56px 20px; color: var(--text-2); border: 1.5px dashed var(--border); border-radius: 12px; }
+.empty-state .empty-ic { font-size: 30px; color: var(--text-3); line-height: 1; margin-bottom: 6px; }
+.empty-state p { margin: 4px 0 12px; font-size: 13px; }
+
+@media (max-width: 1180px) {
+  .x-grid { grid-template-columns: minmax(0, 1fr); }
+  .x-hero { min-height: 0; }
+  .x-nets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .x-nets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .x-counters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .x-counters div:last-child { grid-column: span 2; }
+  .x-big span { font-size: 48px; }
+  canvas#xScene { height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .x-big span, .x-done { animation: none; }
+  .btn, .seg button, .chip, .x-nets button, .x-rows button { transition: none; }
+}
+
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+      <div>
+        <h1>Adaptive Timeout Lab</h1>
+        <p>Adaptive Timeout Optimization for Reliable Client-Server Communication</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost" id="themeBtn" type="button" title="Switch light / dark">Theme: auto</button>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Views">
+      <button type="button" data-view="live" class="on">Live demo</button>
+      <button type="button" data-view="experiments">Experiments</button>
+    </nav>
+  </div>
+</header>
+
+<main class="inner">
+<!-- ===================== LIVE DEMO ===================== -->
+<section class="view on" id="view-live">
+  <div class="layout">
+    <aside class="card pad controls" aria-label="Network settings">
+      <h3>Network</h3>
+      <div class="ctl"><label>Scenario</label>
+        <div class="seg" id="scenario">
+          <button type="button" data-v="steady">Steady</button>
+          <button type="button" data-v="congestion" class="on">Congestion</button>
+          <button type="button" data-v="outage">Outage</button>
+        </div>
+        <div class="hint" id="scenarioHint"></div>
+      </div>
+      <div class="ctl"><label for="base">Base RTT <b id="v_base"></b></label>
+        <input type="range" id="base" min="5" max="600" step="5" value="100">
+        <div class="hint">Normal round-trip time. 5 ms = LAN, 600 ms = satellite.</div></div>
+      <div class="ctl"><label for="jit">Jitter <b id="v_jit"></b></label>
+        <input type="range" id="jit" min="0" max="150" step="1" value="10">
+        <div class="hint">How much RTT varies from packet to packet.</div></div>
+      <div class="ctl"><label for="loss">Packet loss <b id="v_loss"></b></label>
+        <input type="range" id="loss" min="0" max="40" step="1" value="5">
+        <div class="hint">Chance each request or reply disappears.</div></div>
+      <div class="ctl"><label for="n">Requests <b id="v_n"></b></label>
+        <input type="range" id="n" min="50" max="2000" step="50" value="600">
+        <div class="hint">How many requests each client sends.</div></div>
+      <div class="checks"><label><input type="checkbox" id="spikes" checked> Random queueing spikes (2 %)</label></div>
+      <div class="divider"></div>
+      <h3>Fixed timeouts to compare</h3>
+      <div class="inline-inputs">
+        <div class="ctl"><label for="fs">Short (ms)</label><input type="number" id="fs" value="200" min="10" max="5000" step="10"></div>
+        <div class="ctl"><label for="fl">Long (ms)</label><input type="number" id="fl" value="1000" min="10" max="10000" step="50"></div>
+      </div>
+      <div class="ctl"><label for="seed">Random seed <b id="v_seed"></b></label>
+        <input type="range" id="seed" min="1" max="50" step="1" value="7">
+        <div class="hint">Same seed = same losses every time.</div></div>
+      <button class="btn" id="resetDefaults" type="button" style="width:100%">Reset to defaults</button>
+    </aside>
+
+    <div class="stack" style="min-width:0">
+      <div class="card playbar">
+        <button class="btn primary" id="playBtn" type="button">Pause</button>
+        <button class="btn" id="restartBtn" type="button">Restart</button>
+        <button class="btn" id="skipBtn" type="button">Skip to end</button>
+        <div class="speed"><span class="small muted">Speed</span>
+          <div class="seg" id="speedSeg">
+            <button type="button" data-v="0.1">0.1×</button>
+            <button type="button" data-v="0.25" class="on">0.25×</button>
+            <button type="button" data-v="1">1×</button>
+            <button type="button" data-v="5">5×</button>
+            <button type="button" data-v="25">25×</button>
+          </div>
+        </div>
+        <div class="clock"><span>simulated time</span><b id="clock">0.00 s</b><span id="doneCount"></span></div>
+        <div class="progress"><i id="progressBar"></i></div>
+      </div>
+
+      <div class="callout" id="insight">Starting…</div>
+
+      <div class="card pad">
+        <div class="stage-head">
+          <div><h3 style="margin:0">Packet transfer, live</h3>
+            <div class="small muted">Four clients send the same requests over the same network. Each uses a different timeout.</div></div>
+          <div class="pkt-legend" aria-label="Legend">
+            <span><i class="pkt" style="background:var(--s1)">REQ</i>request</span>
+            <span><i class="pkt rs">REQ</i>resent</span>
+            <span><i class="pkt ack">ACK</i>reply</span>
+            <span><i class="pkt dup">ACK</i>late duplicate</span>
+            <span><b class="x-mark">✕</b>lost</span>
+          </div>
+        </div>
+        <canvas id="stage" height="480" role="img" aria-label="Animation of requests and acknowledgements travelling between four clients and their servers"></canvas>
+        <div class="log-head">
+          <h3 style="margin:0">Event log</h3>
+          <label class="small muted">Client <select id="logLane"></select></label>
+        </div>
+        <div class="log-wrap"><table class="log" id="log"></table></div>
+      </div>
+
+      <div class="card pad">
+        <h3>Scorecard <span class="small muted" id="scoreNote"></span></h3>
+        <div class="score-wrap"><table class="score" id="scorecard"></table></div>
+        <p class="muted small" style="margin:8px 0 0">Green = best in column, red = worst. Spurious = copies sent while the original reply was still on its way. Efficiency = requests ÷ packets sent.</p>
+      </div>
+
+      <div class="card pad">
+        <h3 style="margin-bottom:2px">Timeout (RTO) vs measured RTT, request by request</h3>
+        <p class="muted small" style="margin:0 0 10px">Grey dots: measured round-trip times (first-try packets only, Karn’s rule). Line: the timeout each client used. Shaded: congestion or outage. Spikes: exponential back-off after a loss.</p>
+        <div class="grid2" id="rtoPanels"></div>
+      </div>
+
+      <div class="card pad"><div id="sendsChart"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== EXPERIMENTS ===================== -->
+<section class="view" id="view-experiments">
+  <h2>Experiments</h2>
+  <p class="lead">Each experiment repeats the simulation many times while changing one thing, and averages the results.</p>
+  <div class="layout">
+    <aside class="card pad">
+      <div class="exp-list" id="expList">
+        <button type="button" data-k="network" class="on"><span class="t">LAN to satellite</span><span class="d">One policy on six networks (5–600 ms RTT)</span></button>
+        <button type="button" data-k="fixed"><span class="t">The fixed-timeout dilemma</span><span class="d">Fixed values from 100 ms to 2 s</span></button>
+        <button type="button" data-k="jitter"><span class="t">Why variance matters</span><span class="d">Adaptive vs EWMA as jitter grows</span></button>
+        <button type="button" data-k="loss"><span class="t">Packet loss</span><span class="d">0–30 % loss on a steady 120 ms path</span></button>
+        <button type="button" data-k="outage"><span class="t">Outage and back-off</span><span class="d">A dead link, with and without back-off</span></button>
+      </div>
+      <div class="divider"></div>
+      <div class="ctl"><label for="seeds">Runs averaged per point <b id="v_seeds"></b></label>
+        <input type="range" id="seeds" min="2" max="20" step="1" value="6"></div>
+      <div class="inline-inputs">
+        <div class="ctl"><label for="efs">Short fixed (ms)</label><input type="number" id="efs" value="200" min="10" step="10"></div>
+        <div class="ctl"><label for="efl">Long fixed (ms)</label><input type="number" id="efl" value="1000" min="10" step="50"></div>
+      </div>
+      <div class="ctl" id="outageCtl" hidden><label for="olen">Outage length <b id="v_olen"></b></label>
+        <input type="range" id="olen" min="2" max="30" step="1" value="10"></div>
+    </aside>
+    <div class="stack" style="min-width:0">
+      <div class="card pad explorer" id="explorer">
+        <div class="x-head">
+          <div class="x-head-t">
+            <div class="eyebrow">Network explorer</div>
+            <h3 id="xTitle">Satellite</h3>
+            <div class="small muted">Pick a network and a timer. One client sends 40 requests to one server over that network; 5 % of packets are lost. Hover a packet to inspect it.</div>
+          </div>
+          <div class="x-ctrls">
+            <button class="btn primary" id="xPlay" type="button" aria-pressed="false">Pause</button>
+            <button class="btn" id="xRestart" type="button">Restart</button>
+            <div class="seg" id="xSpeed" role="group" aria-label="Animation speed">
+              <button type="button" data-v="0.5" aria-pressed="false">0.5×</button>
+              <button type="button" data-v="1" class="on" aria-pressed="true">1×</button>
+              <button type="button" data-v="2" aria-pressed="false">2×</button>
+              <button type="button" data-v="4" aria-pressed="false">4×</button>
+            </div>
+          </div>
+        </div>
+        <div class="x-nets" id="xNets" role="radiogroup" aria-label="Network"></div>
+        <div class="x-grid">
+          <div class="x-scene-wrap">
+            <div class="seg x-strat" id="xStrat" role="group" aria-label="Timeout strategy"></div>
+            <div class="x-canvas">
+              <canvas id="xScene" tabindex="0" role="img" aria-label="Drawing of the selected network with request and reply packets travelling between the client and the server. Click or press Space to pause."></canvas>
+              <div class="x-tip" id="xTip" hidden></div>
+              <div class="x-done" id="xDone" hidden><div class="x-done-card"><b>Run complete</b><p id="xDoneText"></p><button class="btn primary" id="xReplay" type="button">Replay</button></div></div>
+              <div class="x-fallback" id="xFallback" hidden>This browser can't draw the animation. The results on the right still apply.</div>
+            </div>
+            <div class="x-counters" aria-live="off">
+              <div><span>Request</span><b id="xcReq">–</b></div>
+              <div><span>Packets sent</span><b id="xcSent">0</b></div>
+              <div><span>Lost</span><b id="xcLost" class="bad">0</b></div>
+              <div><span>Resent</span><b id="xcResent">0</b></div>
+              <div><span>Spurious</span><b id="xcSpur" class="warn">0</b></div>
+              <div><span>Timer (RTO)</span><b id="xcRto">–</b></div>
+              <div><span>Last RTT</span><b id="xcRtt">–</b></div>
+            </div>
+            <div class="x-foot">
+              <div class="pkt-legend" aria-label="Legend">
+                <span><i class="pkt" style="background:var(--s1)">REQ</i>request</span>
+                <span><i class="pkt rs">REQ</i>resent</span>
+                <span><i class="pkt ack">ACK</i>reply</span>
+                <span><i class="pkt dup">ACK</i>late duplicate</span>
+                <span><b class="x-mark">✕</b>lost</span>
+              </div>
+              <span class="small muted mono" id="xSlow"></span>
+            </div>
+          </div>
+          <aside class="x-hero" id="xHero" aria-live="polite"></aside>
+        </div>
+      </div>
+      <div class="callout" id="expInsight"></div>
+      <div class="card pad">
+        <div class="chart-tools">
+          <div class="seg metric-toggle" id="metricSeg"></div>
+          <div class="chips" id="seriesChips" role="group" aria-label="Show or hide strategies"></div>
+        </div>
+        <div id="expChart"></div>
+        <div id="expChart2" style="margin-top:18px"></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+/* engine.js - Adaptive Timeout Lab simulation engine (browser + node).
+ *
+ * A JavaScript port of rto_estimator.py + sim_core.py, rebuilt so a run can be
+ * PLAYED in real time: each strategy is a "Lane" whose clock can be advanced a
+ * little at a time, which is what drives the packet animation and live graphs.
+ *
+ *   Lane(strategyKey, params)  .advance(t)  .summary()  .events
+ *   runInstant(key, params)    -> summary (whole run at once)
+ *   sweep(kind, opts)          -> data for the Experiments tab
+ */
+(function (root) {
+  'use strict';
+
+  /* ------------------------------------------------------------ randomness */
+  // mulberry32: small, fast, seeded PRNG so every run is repeatable
+  function rng(seed) {
+    let a = (seed >>> 0) || 1;
+    const next = function () {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    next.gauss = function (mu, sd) {          // Box-Muller
+      let u = 0, v = 0;
+      while (u === 0) u = next();
+      while (v === 0) v = next();
+      return mu + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    };
+    return next;
+  }
+
+  /* -------------------------------------------------- timeout strategies */
+  // Same interface as rto_estimator.py: rto(), onSample(rtt), onTimeout()
+  function Fixed(t) {
+    return { kind: 'fixed', rto: () => t, onSample() {}, onTimeout() {}, srtt: null, rttvar: null, backoff: 1 };
+  }
+  function EWMA() {                       // RFC 793: RTO = 2 x smoothed RTT
+    const s = { kind: 'ewma', srtt: null, rttvar: null, backoff: 1 };
+    s.rto = () => Math.min(60, Math.max(0.05, (s.srtt == null ? 1 : 2 * s.srtt) * s.backoff));
+    s.onSample = r => { s.srtt = s.srtt == null ? r : 0.875 * s.srtt + 0.125 * r; s.backoff = 1; };
+    s.onTimeout = () => { s.backoff = Math.min(s.backoff * 2, 64); };
+    return s;
+  }
+  function Jacobson(noBackoff) {          // RFC 6298 + Karn (caller) + back-off
+    const s = { kind: 'adaptive', srtt: null, rttvar: null, backoff: 1 };
+    const base = () => s.srtt == null ? 1 : s.srtt + Math.max(0.001, 4 * s.rttvar);
+    s.rto = () => Math.min(60, Math.max(0.05, base() * s.backoff));
+    s.onSample = r => {
+      if (s.srtt == null) { s.srtt = r; s.rttvar = r / 2; }
+      else { s.rttvar = 0.75 * s.rttvar + 0.25 * Math.abs(s.srtt - r); s.srtt = 0.875 * s.srtt + 0.125 * r; }
+      s.backoff = 1;
+    };
+    s.onTimeout = () => { if (!noBackoff) s.backoff = Math.min(s.backoff * 2, 64); };
+    return s;
+  }
+
+  const KEYS = ['adaptive', 'ewma', 'short', 'long'];
+  function makeEstimator(key, p) {
+    if (key === 'adaptive') return Jacobson(false);
+    if (key === 'adaptive-nobackoff') return Jacobson(true);
+    if (key === 'ewma') return EWMA();
+    if (key === 'short') return Fixed((p.fixedShortMs || 200) / 1000);
+    if (key === 'long') return Fixed((p.fixedLongMs || 1000) / 1000);
+    if (key === 'fixed') return Fixed(p.fixedMs / 1000);
+    throw new Error('unknown strategy ' + key);
+  }
+  function strategyName(key, p) {
+    const f = ms => ms >= 1000 ? `Fixed ${+(ms / 1000).toFixed(2)} s` : `Fixed ${ms} ms`;
+    return { adaptive: 'Adaptive (Jacobson/Karels)', ewma: 'EWMA (RFC 793)',
+      short: f(p.fixedShortMs || 200), long: f(p.fixedLongMs || 1000) }[key] || key;
+  }
+
+  /* -------------------------------------------------------------- network */
+  /* params: scenario 'steady'|'congestion'|'outage', baseRttMs, jitterMs, lossPct,
+   *         n, seed, spikes (bool), outageStart/outageLen (s) */
+  function buildPhases(p) {
+    const b = p.baseRttMs / 1000, j = p.jitterMs / 1000, n = p.n;
+    if (p.scenario === 'congestion')
+      return [[0, b, j], [Math.floor(n / 3), b * 3, j * 6], [Math.floor(2 * n / 3), b * 0.8, j * 0.8]];
+    return [[0, b, j]];
+  }
+  function Network(p, seed) {
+    const r = rng(seed);
+    const phases = buildPhases(p);
+    const outage = p.scenario === 'outage' ? [p.outageStart ?? 5, (p.outageStart ?? 5) + (p.outageLen ?? 10)] : null;
+    const loss = p.lossPct / 100, spikeP = p.spikes === false ? 0 : 0.02;
+    const minRtt = p.minRtt ?? 0.001;
+    function params(i) { let cur = phases[0]; for (const ph of phases) if (i >= ph[0]) cur = ph; return cur; }
+    return {
+      phases, outage,
+      params,
+      // one transmission: returns {rtt, lost, leg} ; leg = 'req' | 'ack' where it was lost
+      transmit(i, now) {
+        const [, base, jit] = params(i);
+        const lostRandom = r() < loss;
+        let rtt = Math.max(minRtt, r.gauss(base, jit));
+        if (r() < spikeP) rtt += (150 + r() * 250) / 1000;
+        const legDraw = r();
+        const inOutage = outage && now >= outage[0] && now < outage[1];
+        const lost = inOutage || lostRandom;
+        return { rtt, lost, leg: lost ? (inOutage || legDraw < 0.5 ? 'req' : 'ack') : null };
+      },
+    };
+  }
+
+  /* ----------------------------------------------------------------- lane */
+  // One client-server pair using one strategy; stop-and-wait ARQ on a sim clock.
+  function Lane(key, p, opts) {
+    opts = opts || {};
+    const est = opts.estimator || makeEstimator(key, p);
+    const net = Network(p, p.seed ?? 7);
+    const n = p.n, maxTx = opts.maxTx || 20, keepVis = opts.visual !== false;
+    const L = {
+      key, name: strategyName(key, p), est, net, n,
+      now: 0, i: 0, done: false,
+      reqStart: 0, attempts: 0, deadline: Infinity, curRto: 0, firstRto: est.rto(),
+      cur: [],                 // transmissions of the current request
+      vis: [],                 // recent transmissions kept for drawing
+      lastTimeout: -1e9, lastTimeoutRto: 0,
+      tx: 0, spurious: 0, failures: 0, lost: 0,
+      rtt: [], rto: [], lat: [], att: [], tstart: [], sends: [],
+      events: [],
+    };
+    const log = (type, text, at) => {
+      if (!keepVis) return;
+      L.events.push({ t: at ?? L.now, type, text });
+      if (L.events.length > 200) L.events.splice(0, L.events.length - 200);
+    };
+    function send() {
+      const rto = est.rto();
+      L.attempts += 1; L.tx += 1;
+      const d = net.transmit(L.i, L.now);
+      const t = {
+        req: L.i, attempt: L.attempts, t0: L.now, rtt: d.rtt, lost: d.lost, leg: d.leg,
+        srvAt: L.now + d.rtt / 2, ackAt: d.lost ? Infinity : L.now + d.rtt,
+        lossFrac: 0.35 + ((L.i * 7919 + L.attempts * 104729) % 1000) / 3300,
+        accepted: false, dup: false, rto,
+      };
+      if (d.lost) { L.lost += 1; t.lossT = d.leg === 'req' ? t.t0 + t.lossFrac * d.rtt / 2 : t.srvAt + t.lossFrac * d.rtt / 2; }
+      L.cur.push(t);
+      L.sends.push(L.now);
+      L.curRto = rto;
+      L.deadline = L.now + rto;
+      if (keepVis) { L.vis.push(t); if (L.vis.length > 40) L.vis.shift(); }
+      log(L.attempts > 1 ? 'resend' : 'send',
+        `REQ ${L.i} ${L.attempts > 1 ? 'resent (try ' + L.attempts + ')' : 'sent'} · timer ${Math.round(rto * 1000)} ms`);
+      if (d.lost) log('lost', `REQ ${L.i} ${d.leg === 'req' ? 'request' : 'ACK'} lost on the way${net.outage && L.now >= net.outage[0] && L.now < net.outage[1] ? ' (link down)' : ''}`, t.lossT);
+    }
+    function finish(ok, at) {
+      const lat = at - L.reqStart;
+      const firstTryOk = ok && L.attempts === 1;
+      L.rtt.push(firstTryOk ? lat : null);
+      L.rto.push(L.firstRto);
+      L.lat.push(lat);
+      L.att.push(L.attempts);
+      L.tstart.push(L.reqStart);
+      for (const t of L.cur) if (!t.accepted && t.ackAt !== Infinity && t.ackAt > at) t.dup = true;
+      L.cur = [];
+      L.i += 1;
+      if (L.i >= n) { L.done = true; L.finishedAt = at; L.deadline = Infinity; log('done', 'All requests finished'); return; }
+      L.reqStart = at; L.attempts = 0; L.firstRto = est.rto();
+      send();
+    }
+    L.start = function () { L.reqStart = 0; L.firstRto = est.rto(); send(); };
+    L.advance = function (tEnd) {
+      while (!L.done) {
+        let ack = Infinity, ackTx = null;
+        for (const t of L.cur) if (t.ackAt < ack) { ack = t.ackAt; ackTx = t; }
+        const ev = Math.min(ack, L.deadline);
+        if (ev > tEnd) { L.now = tEnd; return; }
+        L.now = ev;
+        if (ack <= L.deadline) {                    // ACK arrived in time
+          ackTx.accepted = true;
+          const sample = L.attempts === 1;
+          if (sample) est.onSample(ack - L.reqStart);  // Karn: only first-try samples
+          log('ack', `ACK ${L.i} received · ${Math.round((ack - ackTx.t0) * 1000)} ms` +
+            (sample ? '' : ' · RTT not used (Karn)'));
+          finish(true, ack);
+        } else {                                     // timer expired
+          const inFlight = L.cur.some(t => t.ackAt !== Infinity && t.ackAt > L.now);
+          if (inFlight) L.spurious += 1;
+          const before = est.rto();
+          est.onTimeout();
+          L.lastTimeout = L.now; L.lastTimeoutRto = est.rto();
+          log('timeout', `Timer expired for REQ ${L.i}` + (inFlight ? ' (reply still on its way: spurious)' : '') +
+            (est.rto() > before ? ` · RTO ${Math.round(before * 1000)} → ${Math.round(est.rto() * 1000)} ms` : ''));
+          if (L.attempts >= maxTx) { L.failures += 1; log('fail', `REQ ${L.i} given up`); finish(false, L.now); }
+          else send();
+        }
+      }
+      L.now = L.finishedAt;
+    };
+    L.summary = function () {
+      const k = L.lat.length;
+      const lats = L.lat.slice().sort((a, b) => a - b);
+      const pct = q => {               // linear interpolation, same as numpy
+        if (!k) return NaN;
+        const x = (k - 1) * q, lo = Math.floor(x), hi = Math.min(lo + 1, k - 1);
+        return lats[lo] + (lats[hi] - lats[lo]) * (x - lo);
+      };
+      const total = k ? L.tstart[k - 1] + L.lat[k - 1] : 0;
+      return {
+        completed: k,
+        meanLatencyMs: k ? 1000 * L.lat.reduce((a, b) => a + b, 0) / k : NaN,
+        p95LatencyMs: 1000 * pct(0.95),
+        retransmissions: L.tx - k - (L.done ? 0 : 1),
+        spurious: L.spurious,
+        spuriousPer100: k ? 100 * L.spurious / k : 0,
+        efficiency: L.tx ? k / Math.max(1, L.tx - (L.done ? 0 : 1)) : 1,
+        totalTimeS: L.done ? total : L.now,
+        failures: L.failures,
+        lostPackets: L.lost,
+      };
+    };
+    L.start();
+    return L;
+  }
+
+  function runInstant(key, p, opts) {
+    const L = Lane(key, p, Object.assign({ visual: false }, opts || {}));
+    L.advance(Infinity);
+    return L;
+  }
+
+  /* -------------------------------------------------------------- sweeps */
+  function avg(list) { const o = {}; for (const k in list[0]) o[k] = list.reduce((a, s) => a + s[k], 0) / list.length; return o; }
+  function averaged(makeParams, key, seeds, opts) {
+    const out = [];
+    for (let s = 0; s < seeds; s++) {
+      const p = makeParams(s);
+      const L = runInstant(key, p, opts);
+      const m = L.summary();
+      out.push({ meanLatencyMs: m.meanLatencyMs, p95LatencyMs: m.p95LatencyMs,
+        spuriousPer100: m.spuriousPer100, efficiencyPct: 100 * m.efficiency });
+    }
+    return avg(out);
+  }
+  const DEF = { scenario: 'steady', spikes: true };
+
+  function sweep(kind, o) {
+    o = o || {};
+    const seeds = o.seeds || 6, fs = o.fixedShortMs || 200, fl = o.fixedLongMs || 1000;
+    const fixed = { fixedShortMs: fs, fixedLongMs: fl };
+    if (kind === 'outage') {
+      const len = o.outageLen || 10;
+      const series = [['Adaptive + exponential back-off', 'adaptive'], ['Adaptive, no back-off', 'adaptive-nobackoff']].map(([name, key]) => {
+        const p = Object.assign({}, DEF, { scenario: 'outage', baseRttMs: 100, jitterMs: 10, lossPct: 0, spikes: false, n: 200, seed: 3, outageStart: 5, outageLen: len });
+        const L = runInstant(key, p, { maxTx: 30 });
+        const inOut = L.sends.filter(t => t >= 5 && t < 5 + len).length;
+        return { name, sends: L.sends, inOutage: inOut };
+      });
+      return { kind, outage: [5, 5 + len], series };
+    }
+    if (kind === 'fixed') {
+      const xs = [100, 150, 200, 300, 400, 600, 800, 1000, 1500, 2000];
+      const base = s => Object.assign({}, DEF, { scenario: 'congestion', baseRttMs: 100, jitterMs: 10, lossPct: 5, n: 600, seed: 100 + s });
+      const fixedVals = xs.map(ms => averaged(s => Object.assign(base(s), { fixedMs: ms }), 'fixed', seeds));
+      const adaptive = averaged(base, 'adaptive', seeds);
+      return { kind, x: xs, fixed: fixedVals, adaptive };
+    }
+    let xs, xlabels, mk, bases;
+    if (kind === 'loss') {
+      xs = [0, 2, 5, 10, 15, 20, 25, 30]; xlabels = xs.map(x => x + ' %');
+      mk = (x, s) => Object.assign({}, DEF, fixed, { baseRttMs: 120, jitterMs: 30, lossPct: x, n: 400, seed: 200 + s });
+    } else if (kind === 'jitter') {
+      xs = [5, 20, 40, 60, 80, 100, 120]; xlabels = xs.map(x => x + ' ms');
+      mk = (x, s) => Object.assign({}, DEF, fixed, { baseRttMs: 150, jitterMs: x, lossPct: 2, spikes: false, n: 400, seed: 300 + s });
+    } else if (kind === 'network') {
+      const nets = [['LAN', 5], ['Metro', 30], ['National', 80], ['Intercontinental', 200], ['Mobile 3G', 400], ['Satellite', 600]];
+      xs = nets.map(x => x[1]); xlabels = nets.map(x => x[0]);
+      mk = (x, s) => Object.assign({}, DEF, fixed, { baseRttMs: x, jitterMs: 0.15 * x, lossPct: 5, spikes: false, n: 400, seed: 400 + s });
+      bases = xs;
+    } else throw new Error('unknown sweep ' + kind);
+    const series = KEYS.map(key => ({
+      key, name: strategyName(key, fixed),
+      values: xs.map(x => {
+        const v = averaged(s => mk(x, s), key, seeds);
+        if (bases) v.latencyOverhead = v.meanLatencyMs / x;
+        return v;
+      }),
+    }));
+    return { kind, x: xs, xlabels, series };
+  }
+
+  const API = { rng, Fixed, EWMA, Jacobson, Network, Lane, runInstant, sweep, strategyName, KEYS, buildPhases };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API;
+  else root.ATL = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* charts.js - tiny dependency-free SVG chart engine for Adaptive Timeout Lab.
+ *
+ *   Charts.line(element, {
+ *     title, subtitle, height,
+ *     x: {label, type:'linear'|'log', min, max, ticks:[{v,label}], fmt},
+ *     y: {label, type:'linear'|'log', min, max, fmt},
+ *     series: [{name, color:'var(--s1)', dash:'6 4', kind:'line'|'scatter'|'step',
+ *               data:[[x,y],...], width, r, hover:true}],
+ *     bands:  [{x0, x1, label}],     shaded x-ranges (e.g. congestion)
+ *     vlines: [{x, label}],          vertical markers
+ *     hlines: [{y, label, color, dash}],
+ *     legend: true, tipX: x => 'label', tipY: (y, s) => 'text'
+ *   })
+ */
+(function () {
+  const all = new Set();   // charts to redraw on resize / tab switch
+
+  function niceStep(span, count) {
+    const raw = span / Math.max(1, count);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    const m = n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10;
+    return m * mag;
+  }
+  function linTicks(min, max, count) {
+    if (!(max > min)) return [min];
+    const step = niceStep(max - min, count);
+    const out = [];
+    for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step)
+      out.push(Math.abs(v) < step * 1e-9 ? 0 : +v.toPrecision(12));
+    return out;
+  }
+  function logTicks(min, max) {
+    const out = [];
+    for (let e = Math.floor(Math.log10(min)); e <= Math.ceil(Math.log10(max)); e++)
+      for (const m of [1, 2, 5]) {
+        const v = m * Math.pow(10, e);
+        if (v >= min * 0.999 && v <= max * 1.001) out.push(v);
+      }
+    return out;
+  }
+  const defFmt = v => {
+    const a = Math.abs(v);
+    if (a >= 1000) return (v / 1000).toFixed(a >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
+    if (a >= 10 || v === 0) return String(Math.round(v));
+    return String(+v.toFixed(2));
+  };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function extent(series, axis, opt) {
+    let lo = Infinity, hi = -Infinity;
+    for (const s of series) for (const p of s.data) {
+      const v = p[axis];
+      if (v == null || !isFinite(v)) continue;
+      if (opt.type === 'log' && v <= 0) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (opt.min != null) lo = opt.min;
+    if (opt.max != null) hi = opt.max;
+    if (hi === lo) hi = lo + 1;
+    return [lo, hi];
+  }
+
+  function line(el, o) {
+    el._chartOpts = o; all.add(el);
+    const W = Math.max(300, Math.round(el.clientWidth || 760));
+    const H = o.height || 300;
+    const labelledBand = (o.bands || []).some(b => b.label);
+    const m = { l: 56, r: 16, t: labelledBand ? 22 : 14, b: o.x && o.x.label ? 46 : 30 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const xo = o.x || {}, yo = o.y || {};
+    let [x0, x1] = extent(o.series, 0, xo);
+    let [y0, y1] = extent(o.series, 1, yo);
+    if (yo.type !== 'log' && yo.min == null) y0 = Math.min(0, y0);
+    if (yo.type !== 'log' && yo.max == null) y1 = y1 + (y1 - y0) * 0.06;
+    if (yo.type === 'log' && yo.min == null) y0 = Math.pow(10, Math.floor(Math.log10(y0) * 4) / 4);
+    if (yo.type === 'log' && yo.max == null) y1 = Math.pow(10, Math.ceil(Math.log10(y1) * 4) / 4);
+    const L = Math.log10;
+    const sx = xo.type === 'log'
+      ? v => m.l + (L(v) - L(x0)) / (L(x1) - L(x0)) * pw
+      : v => m.l + (v - x0) / (x1 - x0) * pw;
+    const sy = yo.type === 'log'
+      ? v => m.t + ph - (L(Math.max(v, y0)) - L(y0)) / (L(y1) - L(y0)) * ph
+      : v => m.t + ph - (Math.min(Math.max(v, y0), y1) - y0) / (y1 - y0) * ph;
+    const yfmt = yo.fmt || defFmt, xfmt = xo.fmt || defFmt;
+
+    let g = '';
+    // bands
+    for (const b of o.bands || []) {
+      const a = sx(Math.max(b.x0, x0)), z = sx(Math.min(b.x1, x1));
+      if (z <= a) continue;
+      g += `<rect x="${a}" y="${m.t}" width="${z - a}" height="${ph}" style="fill:var(--band)"/>`;
+      if (b.label) g += `<text x="${(a + z) / 2}" y="${m.t - 7}" text-anchor="middle" font-size="11" style="fill:var(--text-2)">${esc(b.label)}</text>`;
+    }
+    // y grid + labels
+    const yt = yo.type === 'log' ? logTicks(y0, y1) : linTicks(y0, y1, Math.max(3, Math.round(ph / 55)));
+    for (const v of yt) {
+      const y = sy(v);
+      g += `<line x1="${m.l}" x2="${m.l + pw}" y1="${y}" y2="${y}" style="stroke:var(--grid)" stroke-width="1"/>`;
+      g += `<text x="${m.l - 8}" y="${y + 4}" text-anchor="end" font-size="11" style="fill:var(--text-2)">${esc(yfmt(v))}</text>`;
+    }
+    // x ticks
+    const xt = xo.ticks || (xo.type === 'log' ? logTicks(x0, x1).map(v => ({ v }))
+      : linTicks(x0, x1, Math.max(3, Math.round(pw / 90))).map(v => ({ v })));
+    for (const t of xt) {
+      if (t.v < x0 - 1e-9 || t.v > x1 + 1e-9) continue;
+      const x = sx(t.v);
+      g += `<line x1="${x}" x2="${x}" y1="${m.t + ph}" y2="${m.t + ph + 4}" style="stroke:var(--axis)"/>`;
+      g += `<text x="${x}" y="${m.t + ph + 17}" text-anchor="middle" font-size="11" style="fill:var(--text-2)">${esc(t.label != null ? t.label : xfmt(t.v))}</text>`;
+    }
+    g += `<line x1="${m.l}" x2="${m.l + pw}" y1="${m.t + ph}" y2="${m.t + ph}" style="stroke:var(--axis)"/>`;
+    if (xo.label) g += `<text x="${m.l + pw / 2}" y="${H - 6}" text-anchor="middle" font-size="11.5" style="fill:var(--text-2)">${esc(xo.label)}</text>`;
+    if (yo.label) g += `<text transform="translate(13 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle" font-size="11.5" style="fill:var(--text-2)">${esc(yo.label)}</text>`;
+    // reference lines
+    for (const v of o.vlines || []) {
+      if (v.x < x0 || v.x > x1) continue;
+      const x = sx(v.x);
+      g += `<line x1="${x}" x2="${x}" y1="${m.t}" y2="${m.t + ph}" style="stroke:var(--text-3)" stroke-dasharray="3 4"/>`;
+      if (v.label) g += `<text x="${x + 4}" y="${m.t + 12}" font-size="11" style="fill:var(--text-2)">${esc(v.label)}</text>`;
+    }
+    for (const h of o.hlines || []) {
+      const y = sy(h.y);
+      g += `<line x1="${m.l}" x2="${m.l + pw}" y1="${y}" y2="${y}" style="stroke:${h.color || 'var(--text-3)'}" stroke-width="${h.width || 1.5}" stroke-dasharray="${h.dash || '5 4'}"/>`;
+      if (h.label) g += `<text x="${m.l + pw - 4}" y="${y - 6}" text-anchor="end" font-size="11" style="fill:var(--text-2)">${esc(h.label)}</text>`;
+    }
+    // clip
+    const cid = 'c' + Math.random().toString(36).slice(2, 8);
+    g += `<defs><clipPath id="${cid}"><rect x="${m.l}" y="${m.t - 2}" width="${pw}" height="${ph + 4}"/></clipPath></defs><g clip-path="url(#${cid})">`;
+    // series
+    for (const s of o.series) {
+      const pts = s.data.filter(p => p[1] != null && isFinite(p[1]) && p[0] != null && !(yo.type === 'log' && p[1] <= 0));
+      if (s.kind === 'scatter') {
+        const r = s.r || 1.8;
+        let d = '';
+        for (const p of pts) { const x = sx(p[0]), y = sy(p[1]); d += `M${x - r},${y}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0`; }
+        g += `<path d="${d}" style="fill:${s.color}" fill-opacity="${s.opacity || 0.55}"/>`;
+        continue;
+      }
+      let d = '';
+      let prev = null;
+      for (const p of s.data) {
+        if (p[1] == null || !isFinite(p[1])) { prev = null; continue; }
+        const x = sx(p[0]), y = sy(p[1]);
+        if (!prev) d += `M${x.toFixed(1)},${y.toFixed(1)}`;
+        else if (s.kind === 'step') d += `H${x.toFixed(1)}V${y.toFixed(1)}`;
+        else d += `L${x.toFixed(1)},${y.toFixed(1)}`;
+        prev = p;
+      }
+      g += `<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/>`;
+      if (s.markers) for (const p of pts)
+        g += `<circle cx="${sx(p[0])}" cy="${sy(p[1])}" r="4" style="fill:${s.color};stroke:var(--surface)" stroke-width="2"/>`;
+    }
+    g += `</g>`;
+    g += `<g class="hov"></g><rect class="ov" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
+
+    let html = '';
+    if (o.title) html += `<div class="ctitle">${esc(o.title)}</div>`;
+    if (o.subtitle) html += `<div class="csub">${o.subtitle}</div>`;
+    if (o.legend !== false) {
+      html += '<div class="legend">' + o.series.filter(s => s.name && s.legend !== false).map(s =>
+        s.kind === 'scatter'
+          ? `<span><i class="dot" style="background:${s.color}"></i>${esc(s.name)}</span>`
+          : `<span><svg width="22" height="8"><line x1="1" y1="4" x2="21" y2="4" style="stroke:${s.color}" stroke-width="2.5" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/></svg>${esc(s.name)}</span>`
+      ).join('') + '</div>';
+    }
+    html += `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.title || 'chart')}" font-family="var(--sans)">${g}</svg><div class="tip"></div>`;
+    el.classList.add('chart');
+    el.innerHTML = html;
+
+    // hover
+    const svg = el.querySelector('svg'), ov = el.querySelector('.ov'), tip = el.querySelector('.tip'), hov = el.querySelector('.hov');
+    const hs = o.series.filter(s => s.hover !== false && s.data.length);
+    const invx = px => xo.type === 'log'
+      ? Math.pow(10, L(x0) + (px - m.l) / pw * (L(x1) - L(x0)))
+      : x0 + (px - m.l) / pw * (x1 - x0);
+    function nearest(data, x) {
+      let lo = 0, hi = data.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (data[mid][0] < x) lo = mid; else hi = mid; }
+      return Math.abs(data[lo][0] - x) <= Math.abs(data[hi][0] - x) ? data[lo] : data[hi];
+    }
+    ov.addEventListener('mousemove', ev => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      let x = invx(loc.x);
+      // snap to the x of the first series' nearest point
+      const ref = hs.find(s => s.kind !== 'scatter') || hs[0];
+      if (!ref) return;
+      x = nearest(ref.data, x)[0];
+      let dots = `<line x1="${sx(x)}" x2="${sx(x)}" y1="${m.t}" y2="${m.t + ph}" style="stroke:var(--axis)"/>`;
+      let rows = '';
+      for (const s of hs) {
+        const p = nearest(s.data, x);
+        if (Math.abs(p[0] - x) > (x1 - x0) * 0.02 + 1e-9 && xo.type !== 'log') continue;
+        if (p[1] == null || !isFinite(p[1])) continue;
+        dots += `<circle cx="${sx(p[0])}" cy="${sy(p[1])}" r="4.5" style="fill:${s.color};stroke:var(--surface)" stroke-width="2"/>`;
+        const swatch = s.kind === 'scatter' ? `<i class="dot" style="width:7px;height:7px;border-radius:50%;background:${s.color};display:inline-block"></i>`
+          : `<i class="swatch" style="background:${s.color}"></i>`;
+        rows += `<div class="tr"><span class="k">${swatch}${esc(s.name || '')}</span><span class="v">${esc(o.tipY ? o.tipY(p[1], s) : yfmt(p[1]))}</span></div>`;
+      }
+      hov.innerHTML = dots;
+      tip.innerHTML = `<div class="th">${esc(o.tipX ? o.tipX(x) : xfmt(x))}</div>${rows}`;
+      tip.style.display = 'block';
+      const box = el.getBoundingClientRect(), sbox = svg.getBoundingClientRect();
+      const px = sbox.left - box.left + sx(x) / W * sbox.width;
+      const tw = tip.offsetWidth;
+      tip.style.left = (px + 14 + tw > box.width ? px - tw - 14 : px + 14) + 'px';
+      tip.style.top = (sbox.top - box.top + 20) + 'px';
+    });
+    ov.addEventListener('mouseleave', () => { tip.style.display = 'none'; hov.innerHTML = ''; });
+  }
+
+  function redrawAll() {
+    for (const el of all) {
+      if (!el.isConnected) { all.delete(el); continue; }
+      if (el.offsetParent !== null && el._chartOpts) line(el, el._chartOpts);
+    }
+  }
+  let rt;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(redrawAll, 150); });
+
+  window.Charts = { line, redrawAll };
+})();
+
+</script>
+<script>
+/* explorer.js - Network explorer for the Experiments tab.
+ * Pick one of six networks (LAN ... satellite) and one timeout strategy, and
+ * watch one client and one server exchange requests over a drawing of that
+ * network. The hero panel shows the averaged results from the sweep.
+ *   Explorer.init({ onChange(netIndex, key) })
+ *   Explorer.setData(sweepData, { fixedShortMs, fixedLongMs })
+ *   Explorer.wake()      call when the Experiments view becomes visible
+ */
+(function () {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const KEYS = ['adaptive', 'ewma', 'short', 'long'];
+  const CVAR = { adaptive: '--s1', ewma: '--s2', short: '--s3', long: '--s4' };
+  const fmt = (v, d = 0) => v == null || !isFinite(v) ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+  const N_REQ = 40;
+
+  const NETS = [
+    { name: 'LAN', rtt: 5, sub: 'Office network', km: 'one building', scene: sceneLan, note: 'Signals cross a few metres of cable in nanoseconds; the 5 ms is mostly the computers and the switch.' },
+    { name: 'Metro', rtt: 30, sub: 'Same city', km: '≈ 20 km', scene: sceneMetro, note: 'Each hop through the ISP adds queueing and processing time on top of the travel time.' },
+    { name: 'National', rtt: 80, sub: 'Across India', km: '≈ 2,000 km', scene: sceneNational, note: 'Light in fibre covers about 200 km per ms; routers along the way add the rest of the 80 ms.' },
+    { name: 'Intercontinental', rtt: 200, sub: 'Undersea cable', km: '≈ 8,000 km', scene: sceneOcean, note: 'About 95 % of traffic between continents travels through cables on the sea floor.' },
+    { name: 'Mobile 3G', rtt: 400, sub: 'Phone over radio', km: 'radio + core', scene: sceneMobile, note: 'The radio link waits for a time slot and retries errors itself, so RTT is long and varies.' },
+    { name: 'Satellite', rtt: 600, sub: 'Geostationary', km: '4 × 35,786 km', scene: sceneSatellite },
+  ];
+
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['--s1', '--s2', '--s3', '--s4', '--text', '--text-2', '--text-3', '--wire', '--node', '--border', '--surface', '--surface-2', '--bad', '--warn', '--good', '--grid'])
+      C[k] = cs.getPropertyValue(k).trim();
+  }
+
+  /* ------------------------------------------------------------ state */
+  let net = Math.max(0, Math.min(5, +store.get('atl-xnet', 5) || 5));
+  let key = KEYS.includes(store.get('atl-xkey', 'adaptive')) ? store.get('atl-xkey', 'adaptive') : 'adaptive';
+  let speed = 1, playing = true, lane = null, T = 0, last = 0, raf = 0;
+  let data = null, fixedMs = { fixedShortMs: 200, fixedLongMs: 1000 };
+  let hits = [], hover = null, onChange = () => {};
+  let cv, ctx, W = 800, H = 340, dpr = 1;
+  const reduced = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
+
+  function stratName(k) {
+    if (data) { const s = data.series.find(x => x.key === k); if (s) return s.name; }
+    return { adaptive: 'Adaptive', ewma: 'EWMA', short: `Fixed ${fixedMs.fixedShortMs} ms`, long: `Fixed ${fixedMs.fixedLongMs} ms` }[k];
+  }
+
+  function rebuild() {
+    const rtt = NETS[net].rtt;
+    lane = ATL.Lane(key, Object.assign({ scenario: 'steady', baseRttMs: rtt, jitterMs: 0.15 * rtt, lossPct: 5, n: N_REQ, seed: 11, spikes: false, minRtt: 0.001 }, fixedMs));
+    T = 0; hover = null; hideTip();
+    $('#xDone').hidden = true;
+    updateCounters(); draw(); start();
+  }
+
+  /* ------------------------------------------------------------ loop */
+  function visible() { return cv && cv.offsetParent !== null; }
+  function start() { if (!raf && playing && visible()) { last = performance.now(); raf = requestAnimationFrame(loop); } }
+  function loop(now) {
+    raf = 0;
+    if (!visible()) return;                       // resumes on wake()
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (playing && lane && !lane.done) {
+      T += dt * (NETS[net].rtt / 1000 / 1.4) * speed;
+      lane.advance(T);
+      if (lane.done) {
+        T = Math.max(T, lane.finishedAt);
+        $('#xDone').hidden = false;
+        $('#xDoneText').textContent = `All ${N_REQ} requests delivered. ${lane.tx} packets sent in total (${lane.tx - N_REQ} resends).`;
+      }
+    }
+    draw(); updateCounters();
+    if (playing && lane && !lane.done) raf = requestAnimationFrame(loop);
+    else if (lane && lane.done) draw();
+  }
+  function setPlaying(p) {
+    playing = p;
+    const b = $('#xPlay');
+    b.textContent = p ? 'Pause' : 'Play';
+    b.setAttribute('aria-pressed', String(!p));
+    if (p && lane && lane.done) { rebuild(); return; }
+    if (p) start();
+    draw();
+  }
+
+  /* ------------------------------------------------------------ geometry */
+  function pathLen(P) { let s = 0; const cum = [0]; for (let i = 1; i < P.length; i++) { s += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); cum.push(s); } return cum; }
+  function pointAt(P, cum, f) {
+    f = Math.max(0, Math.min(1, f));
+    const d = f * cum[cum.length - 1];
+    let i = 1; while (i < P.length - 1 && cum[i] < d) i++;
+    const seg = cum[i] - cum[i - 1] || 1, u = (d - cum[i - 1]) / seg;
+    const dx = P[i][0] - P[i - 1][0], dy = P[i][1] - P[i - 1][1], L = Math.hypot(dx, dy) || 1;
+    return { x: P[i - 1][0] + dx * u, y: P[i - 1][1] + dy * u, nx: -dy / L, ny: dx / L };
+  }
+
+  /* ------------------------------------------------------------ drawing helpers */
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
+  function text(t, x, y, o = {}) {
+    ctx.font = `${o.weight || 500} ${o.size || 12}px ${o.mono ? '"JetBrains Mono", ui-monospace, monospace' : '"IBM Plex Sans", system-ui, sans-serif'}`;
+    ctx.fillStyle = o.color || C['--text-2']; ctx.textAlign = o.align || 'center'; ctx.textBaseline = o.base || 'middle';
+    ctx.fillText(t, x, y);
+  }
+  function wrapText(t, x, yBottom, maxW, o) {        // draws upward from yBottom
+    ctx.font = `${o.weight || 500} ${o.size || 12}px "IBM Plex Sans", system-ui, sans-serif`;
+    const lines = []; let cur = '';
+    for (const w of t.split(' ')) { const tryL = cur ? cur + ' ' + w : w; if (ctx.measureText(tryL).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tryL; }
+    lines.push(cur);
+    const lh = (o.size || 12) * 1.35;
+    lines.forEach((l, i) => text(l, x, yBottom - (lines.length - 1 - i) * lh, o));
+  }
+  function wire(P, o = {}) {
+    ctx.save(); ctx.beginPath(); P.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.strokeStyle = o.color || C['--wire']; ctx.lineWidth = o.width || 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (o.dash) ctx.setLineDash(o.dash); ctx.stroke(); ctx.restore();
+  }
+  function computer(x, y, s, dark) {
+    const w = 46 * s, h = 32 * s;
+    rr(x - w / 2, y - h / 2 - 6 * s, w, h, 4 * s); ctx.fillStyle = dark ? '#dfe7f2' : C['--node']; ctx.fill();
+    ctx.strokeStyle = dark ? '#9fb2c8' : C['--text-2']; ctx.lineWidth = 1.6; ctx.stroke();
+    rr(x - w / 2 + 4 * s, y - h / 2 - 2 * s, w - 8 * s, h - 8 * s, 2); ctx.fillStyle = C['--s1']; ctx.globalAlpha = .18; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = dark ? '#9fb2c8' : C['--text-2'];
+    ctx.fillRect(x - 3 * s, y + h / 2 - 6 * s, 6 * s, 7 * s); ctx.fillRect(x - 12 * s, y + h / 2 + 1 * s, 24 * s, 3 * s);
+  }
+  function server(x, y, s, dark) {
+    const w = 38 * s, h = 50 * s;
+    rr(x - w / 2, y - h / 2, w, h, 5 * s); ctx.fillStyle = dark ? '#dfe7f2' : C['--node']; ctx.fill();
+    ctx.strokeStyle = dark ? '#9fb2c8' : C['--text-2']; ctx.lineWidth = 1.6; ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const yy = y - h / 2 + 8 * s + i * 13 * s;
+      rr(x - w / 2 + 5 * s, yy, w - 10 * s, 9 * s, 2); ctx.fillStyle = dark ? '#b9c7d8' : C['--surface-2']; ctx.fill();
+      ctx.beginPath(); ctx.arc(x + w / 2 - 10 * s, yy + 4.5 * s, 1.8 * s, 0, 7); ctx.fillStyle = C['--good']; ctx.fill();
+    }
+  }
+  function box(x, y, w, h, label, s) {
+    rr(x - w / 2, y - h / 2, w, h, 7 * s); ctx.fillStyle = C['--node']; ctx.fill(); ctx.strokeStyle = C['--text-3']; ctx.lineWidth = 1.4; ctx.stroke();
+    if (label) text(label, x, y, { size: 11 * Math.max(.85, s), color: C['--text-2'], weight: 600 });
+  }
+  function caption(name, sub, x, y, dark, s) {
+    text(name, x, y, { size: 12.5 * Math.max(.85, s), weight: 600, color: dark ? '#eef3f9' : C['--text'] });
+    if (sub) text(sub, x, y + 15 * Math.max(.85, s), { size: 11 * Math.max(.85, s), color: dark ? '#a9bbd0' : C['--text-3'] });
+  }
+  function flash(x, y, t, col) {             // t in 0..1, expanding ring
+    if (t < 0 || t > 1) return;
+    ctx.beginPath(); ctx.arc(x, y, 10 + 26 * t, 0, 7); ctx.strokeStyle = col; ctx.globalAlpha = 1 - t; ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+
+  /* ------------------------------------------------------------ scenes
+   * each returns { path, timerAt:[x,y], dark, endA:[x,y], endB:[x,y] } */
+  function sceneLan(s) {
+    const y = H * 0.46, xa = W * 0.12, xb = W * 0.88, xm = W * 0.5;
+    const path = [[xa + 30 * s, y], [xb - 26 * s, y]];
+    wire(path);
+    box(xm, y, 86 * s, 30 * s, 'Switch', s);
+    computer(xa, y, s); server(xb, y, s);
+    caption('Your computer', 'client', xa, y + 44 * s, false, s);
+    caption('Server', 'same office', xb, y + 44 * s, false, s);
+    text('Ethernet cable · a few metres', xm, y + 36 * s, { size: 11, color: C['--text-3'] });
+    return { path, timerAt: [xa, y - 58 * s], endA: [xa, y], endB: [xb, y] };
+  }
+  function sceneMetro(s) {
+    const g = H * 0.80, y = H * 0.48, xa = W * 0.12, xb = W * 0.88, xm = W * 0.5;
+    ctx.fillStyle = C['--surface-2'];
+    for (let i = 0; i < 26; i++) {               // skyline
+      const bw = W / 26, bh = (0.12 + ((i * 37) % 11) / 30) * H;
+      ctx.fillRect(i * bw + 2, g - bh, bw - 4, bh);
+    }
+    ctx.fillStyle = C['--grid']; ctx.fillRect(0, g, W, 2);
+    const path = [[xa + 26 * s, y], [xm, y - 16 * s], [xb - 24 * s, y]];
+    wire(path);
+    // house
+    ctx.beginPath(); ctx.moveTo(xa - 26 * s, y - 2 * s); ctx.lineTo(xa, y - 26 * s); ctx.lineTo(xa + 26 * s, y - 2 * s); ctx.closePath();
+    ctx.fillStyle = C['--s2']; ctx.globalAlpha = .85; ctx.fill(); ctx.globalAlpha = 1;
+    rr(xa - 20 * s, y - 2 * s, 40 * s, 28 * s, 2); ctx.fillStyle = C['--node']; ctx.fill(); ctx.strokeStyle = C['--text-2']; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.fillStyle = C['--s1']; ctx.globalAlpha = .3; ctx.fillRect(xa - 12 * s, y + 4 * s, 10 * s, 9 * s); ctx.globalAlpha = 1;
+    box(xm, y - 16 * s, 96 * s, 30 * s, 'ISP exchange', s);
+    server(xb, y, s);
+    caption('Home', 'client', xa, y + 44 * s, false, s);
+    caption('City data centre', 'server', xb, y + 44 * s, false, s);
+    return { path, timerAt: [xa, y - 50 * s], endA: [xa, y + 8 * s], endB: [xb, y] };
+  }
+  function sceneNational(s) {
+    ctx.save(); ctx.fillStyle = C['--grid'];
+    for (let x = 12; x < W; x += 22) for (let y = 12; y < H; y += 22) { ctx.beginPath(); ctx.arc(x, y, 1, 0, 7); ctx.fill(); }
+    ctx.restore();
+    const cities = [['Bengaluru', 0.12, 0.70], ['Hyderabad', 0.36, 0.56], ['Nagpur', 0.60, 0.44], ['Delhi', 0.88, 0.24]].map(c => [c[0], c[1] * W, c[2] * H]);
+    const path = cities.map(c => [c[1], c[2]]);
+    wire(path, { width: 3.5 });
+    cities.forEach((c, i) => {
+      if (i === 0 || i === 3) return;
+      ctx.beginPath(); ctx.arc(c[1], c[2], 6 * s, 0, 7); ctx.fillStyle = C['--node']; ctx.fill(); ctx.strokeStyle = C['--text-3']; ctx.lineWidth = 2; ctx.stroke();
+      text(c[0], c[1], c[2] + 18 * s, { size: 11.5, color: C['--text-2'] });
+      text('router', c[1], c[2] - 16 * s, { size: 10, color: C['--text-3'], mono: true });
+    });
+    computer(path[0][0], path[0][1], s * 0.9); server(path[3][0], path[3][1], s * 0.9);
+    caption('Bengaluru', 'client', path[0][0], path[0][1] + 40 * s, false, s);
+    caption('Delhi', 'server', path[3][0], path[3][1] + 44 * s, false, s);
+    text('fibre-optic backbone · ≈ 2,000 km', W * 0.54, H * 0.86, { size: 11, color: C['--text-3'] });
+    return { path, timerAt: [path[0][0], path[0][1] - 52 * s], endA: path[0], endB: path[3] };
+  }
+  function sceneOcean(s) {
+    const sea = H * 0.40, floor = H * 0.86;
+    const grad = ctx.createLinearGradient(0, sea, 0, floor);
+    grad.addColorStop(0, 'rgba(42,120,214,.20)'); grad.addColorStop(1, 'rgba(42,120,214,.38)');
+    ctx.fillStyle = grad; ctx.fillRect(0, sea, W, floor - sea);
+    ctx.fillStyle = C['--surface-2'];
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, sea - 6); ctx.lineTo(W * 0.24, sea - 6); ctx.quadraticCurveTo(W * 0.30, sea + 20, W * 0.32, floor); ctx.lineTo(W * 0.68, floor);
+    ctx.quadraticCurveTo(W * 0.70, sea + 20, W * 0.76, sea - 6); ctx.lineTo(W, sea - 6); ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(42,120,214,.45)'; ctx.lineWidth = 1.2;
+    for (let k = 0; k < 3; k++) {                // waves
+      ctx.beginPath();
+      for (let x = W * 0.30; x <= W * 0.70; x += 4) { const yy = sea + 10 + k * 16 + Math.sin(x / 14 + k) * 2.5; x === W * 0.30 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy); }
+      ctx.stroke();
+    }
+    const ya = sea - 34 * s;
+    const path = [[W * 0.10 + 28 * s, ya], [W * 0.25, sea - 4], [W * 0.33, floor - 10], [W * 0.67, floor - 10], [W * 0.75, sea - 4], [W * 0.90 - 24 * s, ya]];
+    wire(path, { width: 3.5 });
+    computer(W * 0.10, ya, s); server(W * 0.90, ya, s);
+    caption('Bengaluru', 'client', W * 0.10, sea + 30 * s, false, s);
+    caption('London', 'server', W * 0.90, sea + 30 * s, false, s);
+    text('undersea fibre cable · ≈ 8,000 km', W * 0.5, floor - 26, { size: 11.5, weight: 600, color: C['--text-2'] });
+    text('Arabian Sea · Red Sea · Mediterranean', W * 0.5, sea + 60, { size: 10.5, color: C['--text-3'] });
+    return { path, timerAt: [W * 0.10, ya - 50 * s], endA: [W * 0.10, ya], endB: [W * 0.90, ya] };
+  }
+  function sceneMobile(s, now) {
+    const g = H * 0.82, ph = [W * 0.10, H * 0.58], tw = [W * 0.32, H * 0.28], cl = [W * 0.60, H * 0.46], sv = [W * 0.88, H * 0.52];
+    ctx.fillStyle = C['--grid']; ctx.fillRect(0, g, W, 2);
+    // radio waves from the tower (animated)
+    for (let k = 0; k < 3; k++) {
+      const r = 14 + ((now / 30 + k * 18) % 54);
+      ctx.beginPath(); ctx.arc(tw[0], tw[1], r * s, Math.PI * 0.65, Math.PI * 1.15); ctx.strokeStyle = C['--s3']; ctx.globalAlpha = Math.max(0, 1 - r / 68) * .8; ctx.lineWidth = 2; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const path = [[ph[0] + 12 * s, ph[1] - 10 * s], [tw[0], tw[1]], [cl[0], cl[1]], [sv[0] - 22 * s, sv[1]]];
+    wire(path.slice(0, 2), { dash: [3, 7], color: C['--s3'], width: 2.5 });
+    wire(path.slice(1), {});
+    // tower
+    ctx.strokeStyle = C['--text-2']; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(tw[0] - 18 * s, g); ctx.lineTo(tw[0], tw[1]); ctx.lineTo(tw[0] + 18 * s, g);
+    for (let k = 1; k < 4; k++) { const yy = tw[1] + (g - tw[1]) * k / 4, hw = 18 * s * k / 4; ctx.moveTo(tw[0] - hw, yy); ctx.lineTo(tw[0] + hw, yy); }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(tw[0], tw[1], 4, 0, 7); ctx.fillStyle = C['--s3']; ctx.fill();
+    // phone
+    rr(ph[0] - 12 * s, ph[1] - 22 * s, 24 * s, 44 * s, 5 * s); ctx.fillStyle = C['--node']; ctx.fill(); ctx.strokeStyle = C['--text-2']; ctx.lineWidth = 1.8; ctx.stroke();
+    rr(ph[0] - 9 * s, ph[1] - 17 * s, 18 * s, 30 * s, 2); ctx.fillStyle = C['--s1']; ctx.globalAlpha = .2; ctx.fill(); ctx.globalAlpha = 1;
+    // cloud
+    ctx.beginPath(); const cr = 20 * s;
+    ctx.arc(cl[0] - cr, cl[1] + 4 * s, cr * .8, Math.PI * .5, Math.PI * 1.5); ctx.arc(cl[0] - cr * .2, cl[1] - cr * .5, cr, Math.PI, 0); ctx.arc(cl[0] + cr, cl[1] + 2 * s, cr * .85, Math.PI * 1.4, Math.PI * .5); ctx.closePath();
+    ctx.fillStyle = C['--node']; ctx.fill(); ctx.strokeStyle = C['--text-3']; ctx.lineWidth = 1.4; ctx.stroke();
+    text('core', cl[0], cl[1] + 4 * s, { size: 10.5, color: C['--text-2'], weight: 600 });
+    server(sv[0], sv[1], s);
+    caption('Phone', 'client', ph[0], ph[1] + 40 * s, false, s);
+    caption('Cell tower', 'radio link: slow, variable', tw[0], g + 16, false, s);
+    caption('Mobile core', 'operator network', cl[0], cl[1] + 40 * s, false, s);
+    caption('Server', 'internet', sv[0], sv[1] + 44 * s, false, s);
+    return { path, timerAt: [ph[0], ph[1] - 50 * s], endA: ph, endB: sv };
+  }
+  const STARS = Array.from({ length: 70 }, (_, i) => [((i * 7919) % 1000) / 1000, ((i * 104729) % 1000) / 1000, 0.4 + ((i * 31) % 10) / 12]);
+  function sceneSatellite(s, now) {
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#060b18'); sky.addColorStop(1, '#13264a');
+    ctx.fillStyle = sky; rr(0, 0, W, H, 8); ctx.fill();
+    for (const [x, y, r] of STARS) { ctx.beginPath(); ctx.arc(x * W, y * H * 0.7, r, 0, 7); ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.4 * Math.abs(Math.sin(now / 900 + x * 40))})`; ctx.fill(); }
+    // Earth
+    const R = W * 1.25, cx = W / 2, cy = H - 120 * Math.max(.8, s) + R;
+    const glow = ctx.createRadialGradient(cx, cy, R - 4, cx, cy, R + 22);
+    glow.addColorStop(0, 'rgba(110,180,255,.55)'); glow.addColorStop(1, 'rgba(110,180,255,0)');
+    ctx.beginPath(); ctx.arc(cx, cy, R + 22, 0, 7); ctx.fillStyle = glow; ctx.fill();
+    const eg = ctx.createLinearGradient(0, cy - R, 0, H);
+    eg.addColorStop(0, '#2f7fbf'); eg.addColorStop(1, '#174a7a');
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.fillStyle = eg; ctx.fill();
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.clip();        // continents
+    ctx.fillStyle = '#3f8f5a';
+    [[0.06, 0.28, 0.07], [0.30, 0.45, 0.06], [0.64, 0.78, 0.08], [0.86, 1.02, 0.07]].forEach(([a, b, h]) => {
+      ctx.beginPath(); ctx.ellipse((a + b) / 2 * W, cy - R + h * H * 0.5, (b - a) / 2 * W, h * H, 0, 0, 7); ctx.fill();
+    });
+    ctx.restore();
+    const ground = x => cy - Math.sqrt(R * R - (x - cx) * (x - cx));
+    const A = [W * 0.14, ground(W * 0.14)], B = [W * 0.86, ground(W * 0.86)];
+    const bob = reduced ? 0 : Math.sin(now / 700) * 3;
+    const S = [W * 0.5, (W < 560 ? 64 : 54 * Math.max(.8, s)) + bob];
+    const dA = [A[0], A[1] - 22 * s], dB = [B[0], B[1] - 22 * s];
+    // beams (cones)
+    ctx.fillStyle = 'rgba(140,200,255,.07)';
+    [[dA, -1], [dB, 1]].forEach(([d]) => { ctx.beginPath(); ctx.moveTo(S[0], S[1]); ctx.lineTo(d[0] - 26, d[1]); ctx.lineTo(d[0] + 26, d[1]); ctx.closePath(); ctx.fill(); });
+    const path = [dA, S, dB];
+    wire(path, { color: 'rgba(170,210,255,.55)', width: 1.8, dash: [6, 6] });
+    // dishes
+    for (const [g, d] of [[A, dA], [B, dB]]) {
+      ctx.strokeStyle = '#d6e2ee'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(g[0], g[1] + 2); ctx.lineTo(d[0], d[1] + 6); ctx.stroke();
+      const ang = Math.atan2(S[1] - d[1], S[0] - d[0]);
+      ctx.save(); ctx.translate(d[0], d[1]); ctx.rotate(ang + Math.PI / 2);
+      ctx.beginPath(); ctx.ellipse(0, 0, 17 * s, 7 * s, 0, 0, Math.PI); ctx.fillStyle = '#eef3f8'; ctx.fill(); ctx.strokeStyle = '#9fb2c8'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 6 * s); ctx.lineTo(0, -10 * s); ctx.strokeStyle = '#d6e2ee'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.restore();
+    }
+    // satellite
+    ctx.save(); ctx.translate(S[0], S[1]);
+    for (const sgn of [-1, 1]) {
+      const px = sgn * 22 * s, pw = 44 * s;
+      ctx.fillStyle = '#1d4f9c'; ctx.fillRect(sgn > 0 ? px : px - pw, -9 * s, pw, 18 * s);
+      ctx.strokeStyle = '#7fb0ff'; ctx.lineWidth = 1;
+      for (let k = 1; k < 4; k++) { const xx = (sgn > 0 ? px : px - pw) + pw * k / 4; ctx.beginPath(); ctx.moveTo(xx, -9 * s); ctx.lineTo(xx, 9 * s); ctx.stroke(); }
+      ctx.strokeRect(sgn > 0 ? px : px - pw, -9 * s, pw, 18 * s);
+      ctx.strokeStyle = '#c9d3df'; ctx.beginPath(); ctx.moveTo(sgn * 12 * s, 0); ctx.lineTo(px, 0); ctx.stroke();
+    }
+    rr(-13 * s, -14 * s, 26 * s, 28 * s, 3); ctx.fillStyle = '#e8b64a'; ctx.fill(); ctx.strokeStyle = '#a77d1f'; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 18 * s, 8 * s, 3 * s, 0, 0, 7); ctx.fillStyle = '#eef3f8'; ctx.fill();
+    ctx.restore();
+    const narrow = W < 560;
+    if (!narrow) text('Geostationary satellite · 35,786 km above the equator', S[0], S[1] - 30 * Math.max(.8, s), { size: 11.5 * Math.max(.85, s), weight: 600, color: '#eef3f9' });
+    const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    const mu = mid(dA, S), md = mid(S, dB);
+    text(narrow ? 'up' : 'uplink ≈ 120 ms', mu[0] - 30 * s, mu[1], { size: 11, color: '#a9c9f0', mono: true, align: 'right' });
+    text(narrow ? 'down' : 'downlink ≈ 120 ms', md[0] + 30 * s, md[1], { size: 11, color: '#a9c9f0', mono: true, align: 'left' });
+    caption('Ground station', 'your end (client)', A[0] + 6, A[1] + 24 * s, true, s);
+    caption('Ground station', 'server end', B[0] - 6, B[1] + 24 * s, true, s);
+    wrapText(narrow ? 'GEO satellite, 35,786 km up. Request and reply each go up and down: RTT ≈ 600 ms.'
+      : 'A request goes up and down (≈ 72,000 km); the reply does the same. Add processing and ground links → RTT ≈ 600 ms.', W / 2, H - 12, W - 24, { size: 10.5 * Math.max(.85, s), color: '#a9bbd0' });
+    return { path, timerAt: [W * 0.14, W < 560 ? 18 : 30 * Math.max(.8, s)], dark: true, endA: dA, endB: dB };
+  }
+
+  /* ------------------------------------------------------------ packets */
+  function capsule(x, y, label, kind, col) {
+    ctx.font = `600 10px "JetBrains Mono", ui-monospace, monospace`;
+    const w = Math.max(40, ctx.measureText(label).width + 14), h = 18;
+    rr(x - w / 2, y - h / 2, w, h, 9);
+    if (kind === 'resend') { ctx.fillStyle = C['--surface']; ctx.fill(); ctx.setLineDash([3, 2]); ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.stroke(); ctx.setLineDash([]); }
+    else if (kind === 'dup') { ctx.fillStyle = C['--surface-2']; ctx.fill(); ctx.strokeStyle = C['--border']; ctx.lineWidth = 1; ctx.stroke(); }
+    else { ctx.fillStyle = col; ctx.fill(); }
+    text(label, x, y + 0.5, { size: 10, mono: true, weight: 600, color: kind === 'resend' ? C['--text'] : kind === 'dup' ? C['--text-3'] : (kind === 'ack' ? C['--surface'] : '#fff') });
+    return { x: x - w / 2, y: y - h / 2, w, h };
+  }
+  function xmark(x, y, a) {
+    ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = C['--bad']; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+  }
+
+  function draw() {
+    if (!ctx) return;
+    const now = performance.now();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const s = Math.max(0.68, Math.min(1, W / 760));
+    const sc = NETS[net].scene(s, now);
+    if (NETS[net].note) wrapText(NETS[net].note, W / 2, H - 12, W - 24, { size: 11 * Math.max(.85, s), color: C['--text-3'] });
+    hits = [];
+    if (!lane) return;
+    const P = sc.path, cum = pathLen(P), col = C[CVAR[key]];
+    const half = t => t.rtt / 2, rttS = NETS[net].rtt / 1000;
+    let srvFlash = -1, cliFlash = -1;
+    for (const t of lane.vis) {
+      const reqEnd = t.lost && t.leg === 'req' ? t.lossT : t.srvAt;
+      if (T >= t.t0 && T < reqEnd) {
+        const p = pointAt(P, cum, (T - t.t0) / half(t));
+        const lab = `REQ ${t.req + 1}`;
+        const b = capsule(p.x + p.nx * -9, p.y + p.ny * -9, lab, t.attempt > 1 ? 'resend' : 'req', col);
+        hits.push(Object.assign(b, { t, dir: 'req' }));
+      }
+      if (!(t.lost && t.leg === 'req') && T >= t.srvAt) {
+        const fs = (T - t.srvAt) / (rttS * 0.35); if (fs < 1) srvFlash = Math.max(srvFlash, 1 - fs);
+        const ackEnd = t.lost ? t.lossT : t.ackAt;
+        if (T < ackEnd) {
+          const p = pointAt(P, cum, 1 - (T - t.srvAt) / half(t));
+          const b = capsule(p.x + p.nx * -9 * -1, p.y + p.ny * 9, `ACK ${t.req + 1}`, t.dup ? 'dup' : 'ack', C['--text-2']);
+          hits.push(Object.assign(b, { t, dir: 'ack' }));
+        } else if (!t.lost) {
+          const fc = (T - t.ackAt) / (rttS * 0.35); if (fc < 1 && !t.dup) cliFlash = Math.max(cliFlash, 1 - fc);
+        }
+      }
+      if (t.lost && T >= t.lossT && T < t.lossT + rttS * 0.6) {
+        const f = t.leg === 'req' ? (t.lossT - t.t0) / half(t) : 1 - (t.lossT - t.srvAt) / half(t);
+        const p = pointAt(P, cum, f);
+        const a = 1 - (T - t.lossT) / (rttS * 0.6);
+        xmark(p.x, p.y, a);
+        text(t.leg === 'req' ? 'request lost' : 'reply lost', p.x, p.y - 22, { size: 10.5, color: C['--bad'], weight: 600 });
+        hits.push({ x: p.x - 14, y: p.y - 14, w: 28, h: 28, t, dir: 'lost' });
+      }
+    }
+    if (srvFlash > 0) flash(sc.endB[0], sc.endB[1], 1 - srvFlash, C['--good']);
+    if (cliFlash > 0) flash(sc.endA[0], sc.endA[1], 1 - cliFlash, col);
+    drawTimer(sc, col);
+    if (!playing && !lane.done) {
+      rr(W - 86, 10, 76, 24, 12); ctx.fillStyle = sc.dark ? 'rgba(255,255,255,.14)' : C['--surface-2']; ctx.fill();
+      text('Paused', W - 48, 22.5, { size: 11.5, weight: 600, color: sc.dark ? '#fff' : C['--text-2'] });
+    }
+  }
+  function drawTimer(sc, col) {
+    if (lane.done) return;
+    const [x, y] = sc.timerAt, w = 132, h = 22;
+    const bx = Math.max(6, Math.min(W - w - 6, x - w / 2));
+    const left = Math.max(0, lane.deadline - T), frac = lane.curRto ? 1 - left / lane.curRto : 0;
+    const since = T - lane.lastTimeout, firing = since >= 0 && since < Math.max(0.3 * lane.lastTimeoutRto, 0.35 * NETS[net].rtt / 1000);
+    rr(bx, y - h / 2, w, h, 6); ctx.fillStyle = sc.dark ? 'rgba(10,20,40,.75)' : C['--surface']; ctx.fill();
+    ctx.strokeStyle = firing ? C['--bad'] : (sc.dark ? 'rgba(255,255,255,.25)' : C['--border']); ctx.lineWidth = firing ? 2 : 1; ctx.stroke();
+    ctx.save(); rr(bx, y - h / 2, w, h, 6); ctx.clip();
+    ctx.fillStyle = frac > 0.8 ? C['--warn'] : col; ctx.globalAlpha = .28; ctx.fillRect(bx, y - h / 2, w * Math.min(1, frac), h); ctx.restore(); ctx.globalAlpha = 1;
+    const label = firing ? 'TIMEOUT → resend' : `timer ${fmt(left * 1000)} / ${fmt(lane.curRto * 1000)} ms`;
+    text(label, bx + w / 2, y + 0.5, { size: 10.5, mono: true, weight: 600, color: firing ? C['--bad'] : (sc.dark ? '#eef3f9' : C['--text']) });
+  }
+
+  /* ------------------------------------------------------------ tooltip */
+  function hideTip() { const t = $('#xTip'); if (t) t.hidden = true; if (cv) cv.style.cursor = 'pointer'; }
+  function onMove(e) {
+    const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const h = hits.slice().reverse().find(b => x >= b.x - 3 && x <= b.x + b.w + 3 && y >= b.y - 3 && y <= b.y + b.h + 3);
+    const tip = $('#xTip');
+    if (!h) { hideTip(); return; }
+    const t = h.t, rtt = Math.round(t.rtt * 1000);
+    let msg;
+    if (h.dir === 'lost') msg = `<b>${t.leg === 'req' ? 'Request' : 'Reply'} ${t.req + 1} lost</b><br>The client only finds out when its timer runs out.`;
+    else if (h.dir === 'req') msg = `<b>REQ ${t.req + 1}${t.attempt > 1 ? ` · try ${t.attempt}` : ''}</b><br>Timer set to ${fmt(t.rto * 1000)} ms` +
+      (t.lost ? (t.leg === 'req' ? '<br><span class="bad">Will be lost on the way</span>' : '<br><span class="bad">Its reply will be lost</span>') : `<br>Round trip will take ${rtt} ms`);
+    else msg = `<b>ACK ${t.req + 1}${t.dup ? ' · duplicate' : ''}</b><br>` + (t.dup ? 'Arrives after a resend already succeeded: wasted bandwidth.' : `Reply to try ${t.attempt}, round trip ${rtt} ms`);
+    tip.innerHTML = msg; tip.hidden = false; cv.style.cursor = 'help';
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(4, Math.min(r.width - tw - 4, x + 12)) + 'px';
+    tip.style.top = Math.max(4, y - tip.offsetHeight - 10) + 'px';
+  }
+
+  /* ------------------------------------------------------------ HTML panels */
+  function updateCounters() {
+    if (!lane) return;
+    const done = lane.lat.length, inflight = lane.done ? 0 : 1;
+    const lastRtt = (() => { for (let i = lane.rtt.length - 1; i >= 0; i--) if (lane.rtt[i] != null) return lane.rtt[i]; return null; })();
+    const vals = {
+      xcReq: `${Math.min(N_REQ, done + inflight)} / ${N_REQ}`,
+      xcSent: fmt(lane.tx), xcLost: fmt(lane.lost),
+      xcResent: fmt(Math.max(0, lane.tx - done - inflight)), xcSpur: fmt(lane.spurious),
+      xcRto: lane.done ? '–' : fmt(lane.curRto * 1000) + ' ms',
+      xcRtt: lastRtt == null ? '–' : fmt(lastRtt * 1000) + ' ms',
+    };
+    for (const k in vals) { const el = document.getElementById(k); if (el && el.textContent !== vals[k]) el.textContent = vals[k]; }
+    const f = 1.4 / (NETS[net].rtt / 1000) / speed;
+    $('#xSlow').textContent = f >= 1.05 ? `shown ${fmt(f, f < 10 ? 1 : 0)}× slower than real life` : f <= 0.95 ? `shown ${fmt(1 / f, 1)}× faster than real life` : 'shown at real speed';
+  }
+
+  function verdict(v, all) {
+    const best = Math.min(...all.map(a => a.meanLatencyMs));
+    if (v.spuriousPer100 >= 15 || v.efficiencyPct < 80) return ['bad', 'Floods this network with resends'];
+    if (v.meanLatencyMs > 1.35 * best) return ['warn', 'Too slow to recover from losses'];
+    return ['good', 'Good fit for this network'];
+  }
+  function explain(v, cls) {
+    const rtt = NETS[net].rtt, nm = esc(stratName(key));
+    if (cls === 'bad') return `${nm}'s timer runs out before a ${rtt} ms reply can arrive, so it resends packets that were never lost. Only ${fmt(v.efficiencyPct, 0)} % of packets sent were useful.`;
+    if (cls === 'warn') return key === 'long' || key === 'ewma'
+      ? `${nm} waits far longer than the ${rtt} ms RTT before resending, so every lost packet costs a long, idle wait.`
+      : `${nm} is slower here than the best timer because its RTO doesn't match a ${rtt} ms path.`;
+    if (key === 'adaptive') return `It measures each reply and sets RTO = SRTT + 4×RTTVAR, just above the ${rtt} ms RTT, so it resends quickly but only when a packet is really lost.`;
+    return `${nm} happens to suit a ${rtt} ms path. Change the network and see if it still does.`;
+  }
+  function renderHero() {
+    const el = $('#xHero');
+    if (!data || data.kind !== 'network') {
+      el.innerHTML = '<div class="x-empty"><span class="spinner"></span><div><b>Measuring…</b><br>Running 4 timers × 6 networks.</div></div>';
+      return;
+    }
+    const all = data.series.map(s => s.values[net]);
+    const v = data.series.find(s => s.key === key).values[net];
+    const [cls, word] = verdict(v, all);
+    const maxMean = Math.max(...all.map(a => a.meanLatencyMs));
+    el.innerHTML = `
+      <div class="eyebrow">Mean latency per request</div>
+      <div class="x-big" style="--c:var(${CVAR[key]})"><span>${fmt(v.meanLatencyMs)}</span><small>ms</small></div>
+      <div class="x-sub">${fmt(v.latencyOverhead, 2)}× the ideal (network RTT ${NETS[net].rtt} ms)</div>
+      <div class="x-verdict ${cls}">${word}</div>
+      <p class="x-why">${explain(v, cls)}</p>
+      <div class="x-mini">
+        <div><b>${fmt(v.efficiencyPct, 0)} %</b><span>efficiency</span></div>
+        <div><b>${fmt(v.p95LatencyMs)}</b><span>p95 ms</span></div>
+        <div><b>${fmt(v.spuriousPer100, 1)}</b><span>spurious /100</span></div>
+      </div>
+      <div class="x-rows" role="radiogroup" aria-label="Compare timers on this network">
+        ${data.series.map(s => {
+          const w = Math.max(4, 100 * s.values[net].meanLatencyMs / maxMean);
+          return `<button type="button" role="radio" aria-checked="${s.key === key}" data-k="${s.key}" class="${s.key === key ? 'on' : ''}" style="--c:var(${CVAR[s.key]})">
+            <span class="nm" title="${esc(s.name)}"><i class="swatch" style="background:var(${CVAR[s.key]})"></i>${esc(s.name.replace(/ \(.*\)/, ''))}</span>
+            <span class="bar"><i style="width:${w}%"></i></span><span class="v">${fmt(s.values[net].meanLatencyMs)} ms</span></button>`;
+        }).join('')}
+      </div>
+      <div class="hint">Averaged over 400 requests × ${data.seeds || 'several'} runs at 5 % loss. Click a timer to watch it.</div>`;
+    el.querySelectorAll('.x-rows button').forEach(b => b.addEventListener('click', () => setKey(b.dataset.k)));
+  }
+  function renderNets() {
+    const box = $('#xNets');
+    box.innerHTML = NETS.map((n, i) => `<button type="button" role="radio" aria-checked="${i === net}" tabindex="${i === net ? 0 : -1}" data-i="${i}" class="${i === net ? 'on' : ''}">
+      <span class="t">${n.name}</span><span class="r mono">${n.rtt} ms</span><span class="d">${n.sub}</span></button>`).join('');
+    box.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => setNet(+b.dataset.i));
+      b.addEventListener('keydown', e => {
+        const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        if (!d) return; e.preventDefault();
+        setNet((net + d + NETS.length) % NETS.length);
+        box.querySelector(`[data-i="${net}"]`).focus();
+      });
+    });
+  }
+  function renderStratSeg() {
+    const seg = $('#xStrat');
+    seg.innerHTML = KEYS.map(k => `<button type="button" data-k="${k}" class="${k === key ? 'on' : ''}" aria-pressed="${k === key}" style="--c:var(${CVAR[k]})"><i class="swatch" style="background:var(${CVAR[k]})"></i>${esc(stratName(k))}</button>`).join('');
+    seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setKey(b.dataset.k)));
+  }
+  function setNet(i) {
+    if (i === net) return;
+    net = i; store.set('atl-xnet', i);
+    renderNets(); renderHero(); $('#xTitle').textContent = `${NETS[net].name}: ${NETS[net].sub.toLowerCase()} · ${NETS[net].km}`;
+    rebuild(); onChange(net, key);
+  }
+  function setKey(k) {
+    if (k === key) return;
+    key = k; store.set('atl-xkey', k);
+    renderStratSeg(); renderHero(); rebuild(); onChange(net, key);
+  }
+
+  /* ------------------------------------------------------------ sizing */
+  function size() {
+    if (!cv) return;
+    const w = Math.round(cv.clientWidth || 0);
+    if (!w) return;
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = w; H = W < 560 ? 300 : 360;
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    draw();
+  }
+
+  /* ------------------------------------------------------------ public */
+  function init(o) {
+    onChange = (o && o.onChange) || onChange;
+    cv = $('#xScene');
+    ctx = cv.getContext && cv.getContext('2d');
+    readColors();
+    if (!ctx) { $('#xFallback').hidden = false; return; }
+    try { new MutationObserver(() => { readColors(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) {}
+    try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); draw(); }); } catch (e) {}
+    window.addEventListener('resize', () => { size(); });
+    renderNets(); renderStratSeg(); renderHero();
+    $('#xTitle').textContent = `${NETS[net].name}: ${NETS[net].sub.toLowerCase()} · ${NETS[net].km}`;
+    $('#xPlay').addEventListener('click', () => setPlaying(!playing));
+    $('#xRestart').addEventListener('click', () => { rebuild(); if (!playing) setPlaying(true); });
+    $('#xReplay').addEventListener('click', () => { rebuild(); setPlaying(true); });
+    $$('#xSpeed button').forEach(b => b.addEventListener('click', () => {
+      speed = +b.dataset.v; $$('#xSpeed button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      updateCounters();
+    }));
+    cv.addEventListener('click', () => setPlaying(!playing));
+    cv.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setPlaying(!playing); } });
+    cv.addEventListener('mousemove', onMove);
+    cv.addEventListener('mouseleave', hideTip);
+    if (reduced) playing = false, $('#xPlay').textContent = 'Play';
+    size(); rebuild();
+  }
+  function $$(s) { return Array.from(document.querySelectorAll(s)); }
+  function setData(d, fx) {
+    const changed = fx && (fx.fixedShortMs !== fixedMs.fixedShortMs || fx.fixedLongMs !== fixedMs.fixedLongMs);
+    if (fx) fixedMs = { fixedShortMs: fx.fixedShortMs, fixedLongMs: fx.fixedLongMs };
+    data = d; if (d && fx) d.seeds = fx.seeds;
+    renderStratSeg(); renderHero();
+    if (changed && ctx) rebuild();
+  }
+  function wake() { readColors(); size(); start(); }
+  function selected() { return { net, key }; }
+
+  window.Explorer = { init, setData, wake, selected, NETS };
+})();
+
+</script>
+<script>
+/* ui.js - Adaptive Timeout Lab page logic (needs engine.js + charts.js) */
+(function () {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+  const KEYS = ATL.KEYS;                                   // adaptive, ewma, short, long
+  const CVAR = { adaptive: '--s1', ewma: '--s2', short: '--s3', long: '--s4' };
+  const COLOR = k => `var(${CVAR[k]})`;
+  const DASH = { adaptive: null, ewma: '8 5', short: '10 4 2 4', long: '2 4' };
+  const fmt = (v, d = 0) => v == null || !isFinite(v) ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const ms = v => fmt(v) + ' ms';
+  const debounce = (fn, t) => { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), t); }; };
+  const pct = (arr, q) => { const v = arr.filter(x => x != null && isFinite(x)).sort((a, b) => a - b); return v.length ? v[Math.min(v.length - 1, Math.floor((v.length - 1) * q))] : 0; };
+  const sw = k => `<i class="swatch" style="background:${COLOR(k)}"></i>`;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+  const thin = (pts, max) => { if (pts.length <= max) return pts; const out = [], step = pts.length / max; for (let i = 0; i < pts.length; i += step) out.push(pts[Math.floor(i)]); out.push(pts[pts.length - 1]); return out; };
+
+  /* ---------------- theme ---------------- */
+  const themes = ['auto', 'light', 'dark'];
+  let theme = store.get('atl-theme', 'auto');
+  let C = {};                                   // resolved colours for the canvas
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['--s1', '--s2', '--s3', '--s4', '--text', '--text-2', '--text-3', '--wire', '--node', '--border', '--surface', '--surface-2', '--bad', '--warn', '--good', '--band'])
+      C[k] = cs.getPropertyValue(k).trim();
+  }
+  function applyTheme() {
+    if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', theme);
+    $('#themeBtn').textContent = 'Theme: ' + theme;
+    readColors();
+  }
+  $('#themeBtn').addEventListener('click', () => {
+    theme = themes[(themes.indexOf(theme) + 1) % 3]; store.set('atl-theme', theme); applyTheme();
+    Charts.redrawAll(); draw();
+  });
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); draw(); }); } catch (e) {}
+  applyTheme();
+
+  /* ---------------- views ---------------- */
+  const inited = {};
+  function showView(name) {
+    if (!document.getElementById('view-' + name)) name = 'live';
+    $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === name));
+    $$('section.view').forEach(s => s.classList.toggle('on', s.id === 'view-' + name));
+    if (name === 'experiments' && !inited.exp) { inited.exp = true; initExp(); }
+    else Charts.redrawAll();
+    if (name === 'experiments' && window.Explorer) Explorer.wake();
+    if (name === 'live') { sizeCanvas(); draw(); }
+  }
+  $$('#tabs button').forEach(b => b.addEventListener('click', () => { location.hash = b.dataset.view; }));
+  window.addEventListener('hashchange', () => showView(location.hash.slice(1)));
+
+  /* ---------------- scorecard (shared) ---------------- */
+  function scorecard(el, rows, cols) {
+    let h = '<tr><th>Strategy</th>' + cols.map(c => `<th>${c.label}</th>`).join('') + '</tr>';
+    const ext = {};
+    for (const c of cols) {
+      const vs = rows.map(r => r.values[c.id]).filter(v => v != null && isFinite(v));
+      ext[c.id] = vs.length ? { best: c.better === 'high' ? Math.max(...vs) : Math.min(...vs), worst: c.better === 'high' ? Math.min(...vs) : Math.max(...vs) } : {};
+    }
+    for (const r of rows) {
+      h += `<tr><td><span class="strat">${sw(r.key)}${esc(r.name)}</span></td>`;
+      for (const c of cols) {
+        const v = r.values[c.id], e = ext[c.id];
+        const cls = e.best !== e.worst && v === e.best ? 'best' : e.best !== e.worst && v === e.worst ? 'worst' : '';
+        h += `<td class="num"><span class="${cls}">${c.fmt(v)}</span></td>`;
+      }
+      h += '</tr>';
+    }
+    el.innerHTML = h;
+  }
+
+  /* =================== LIVE DEMO =================== */
+  const DEFAULTS = { scenario: 'congestion', base: 100, jit: 10, loss: 5, n: 600, seed: 7, fs: 200, fl: 1000, spikes: true };
+  const HINTS = {
+    steady: 'Round-trip time stays the same for the whole run.',
+    congestion: 'The middle third of requests gets 3× the RTT and more jitter (router queues filling up), then the network speeds up to 0.8×.',
+    outage: 'Every packet is lost between 5 s and 15 s of simulated time, as if the link went down.',
+  };
+  let P = null, lanes = [], T = 0, playing = false, speed = +store.get('atl-speed', 0.25) || 0.25;
+  let lastTs = null, lastUi = 0, finished = false;
+
+  function readParams() {
+    return {
+      scenario: $('#scenario .on').dataset.v,
+      baseRttMs: +$('#base').value, jitterMs: +$('#jit').value, lossPct: +$('#loss').value,
+      n: +$('#n').value, seed: +$('#seed').value, spikes: $('#spikes').checked,
+      fixedShortMs: Math.min(5000, Math.max(10, +$('#fs').value || 200)),
+      fixedLongMs: Math.min(10000, Math.max(10, +$('#fl').value || 1000)),
+      outageStart: 5, outageLen: 10,
+    };
+  }
+  function labels() {
+    $('#v_base').textContent = $('#base').value + ' ms';
+    $('#v_jit').textContent = $('#jit').value + ' ms';
+    $('#v_loss').textContent = $('#loss').value + ' %';
+    $('#v_n').textContent = $('#n').value;
+    $('#v_seed').textContent = $('#seed').value;
+    $('#scenarioHint').textContent = HINTS[$('#scenario .on').dataset.v];
+  }
+  function rebuild() {
+    labels();
+    P = readParams();
+    lanes = KEYS.map(k => ATL.Lane(k, P));
+    T = 0; finished = false;
+    const sel = $('#logLane'), prev = sel.value || 'adaptive';
+    sel.innerHTML = lanes.map(l => `<option value="${l.key}">${esc(l.name)}</option>`).join('');
+    sel.value = prev;
+    if (!playing) setPlaying(true);
+    updateUi(); draw();
+  }
+  function setPlaying(v) {
+    playing = v;
+    $('#playBtn').textContent = finished ? 'Replay' : playing ? 'Pause' : 'Play';
+    if (playing) { lastTs = null; requestAnimationFrame(loop); }
+  }
+  function allDone() { return lanes.every(l => l.done); }
+  function endTime() { return Math.max(...lanes.map(l => l.finishedAt || 0)); }
+  function loop(ts) {
+    if (!playing) return;
+    if (lastTs == null) lastTs = ts;
+    const dt = Math.min(0.05, (ts - lastTs) / 1000); lastTs = ts;
+    T += dt * speed;
+    for (const l of lanes) l.advance(T);
+    if (allDone()) { T = endTime(); finished = true; playing = false; $('#playBtn').textContent = 'Replay'; updateUi(); draw(); return; }
+    draw();
+    if (ts - lastUi > 320) { lastUi = ts; updateUi(); }
+    requestAnimationFrame(loop);
+  }
+
+  /* ---------- canvas: the packet animation ---------- */
+  const cv = $('#stage'), ctx = cv.getContext('2d');
+  let laneH = 126, cssW = 0;
+  function sizeCanvas() {
+    const w = Math.round(cv.clientWidth);
+    if (!w) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    laneH = w < 560 ? 120 : 126;
+    const h = laneH * 4;
+    if (w !== cssW || cv.height !== Math.round(h * dpr)) {
+      cssW = w; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+  window.addEventListener('resize', debounce(() => { sizeCanvas(); draw(); }, 120));
+
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  const CAPW = 64, CAPH = 18;
+  function capsule(x, y, text, kind, color, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha ?? 1;
+    rr(x, y - CAPH / 2, CAPW, CAPH, 9);
+    if (kind === 'req') { ctx.fillStyle = color; ctx.fill(); ctx.fillStyle = '#fff'; }
+    else if (kind === 'rs') { ctx.fillStyle = C['--surface']; ctx.fill(); ctx.setLineDash([3, 2]); ctx.lineWidth = 1.6; ctx.strokeStyle = color; ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = C['--text']; }
+    else if (kind === 'ack') { ctx.fillStyle = C['--text-2']; ctx.fill(); ctx.fillStyle = C['--surface']; }
+    else { ctx.fillStyle = C['--surface-2']; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = C['--border']; ctx.stroke(); ctx.fillStyle = C['--text-3']; }
+    ctx.font = '600 10.5px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + CAPW / 2, y + 0.5);
+    ctx.restore();
+  }
+  function xmark(x, y, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = C['--bad']; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7); ctx.stroke();
+    ctx.restore();
+  }
+  function txt(s, x, y, o) {
+    ctx.save(); ctx.fillStyle = o.color || C['--text']; ctx.font = o.font || '13px ' + 'system-ui, sans-serif';
+    ctx.textAlign = o.align || 'left'; ctx.textBaseline = o.base || 'alphabetic'; ctx.fillText(s, x, y); ctx.restore();
+  }
+
+  function draw() {
+    if (!lanes.length || !$('#view-live').classList.contains('on')) return;
+    sizeCanvas();
+    const W = cssW;
+    if (!W) return;
+    const sans = getComputedStyle(document.body).getPropertyValue('--sans');
+    const mono = getComputedStyle(document.body).getPropertyValue('--mono');
+    ctx.clearRect(0, 0, W, laneH * 4);
+    const nodeW = W < 560 ? 58 : 76, nodeH = 36;
+    lanes.forEach((L, k) => {
+      const y0 = k * laneH, mid = y0 + 82;
+      const col = C[CVAR[L.key]];
+      if (k) { ctx.fillStyle = C['--border']; ctx.fillRect(0, y0, W, 1); }
+      // header
+      ctx.fillStyle = col; ctx.fillRect(12, y0 + 13, 18, 3);
+      txt(L.name, 38, y0 + 19, { font: '600 13px ' + sans });
+      const cur = Math.min(L.i + 1, L.n), resent = L.tx - L.i - (L.done ? 0 : 1);
+      const lostSeen = L.lost - L.vis.filter(t => t.lost && t.lossT > T).length;
+      const rtoNow = L.done ? null : L.curRto;
+      txt(`REQ ${cur}/${L.n} · sent ${L.tx} · lost ${lostSeen} · resent ${Math.max(0, resent)}` + (rtoNow != null ? ` · RTO ${Math.round(rtoNow * 1000)} ms` : ''),
+        12, y0 + 38, { font: '11.5px ' + mono, color: C['--text-2'] });
+      // nodes and wire
+      const cX = 12, sX = W - 12 - nodeW, wL = cX + nodeW, wR = sX, reqY = mid - 9, ackY = mid + 9;
+      ctx.strokeStyle = C['--wire']; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(wL, reqY); ctx.lineTo(wR, reqY); ctx.moveTo(wL, ackY); ctx.lineTo(wR, ackY); ctx.stroke();
+      const outage = L.net.outage, Tl = L.done ? L.finishedAt : T;
+      const down = outage && Tl >= outage[0] && Tl < outage[1];
+      const status = [];                      // drawn right-aligned in the lane header
+      const since = T - L.lastTimeout;
+      if (!L.done && since >= 0 && since < Math.max(0.25 * L.lastTimeoutRto, 0.06))
+        status.push(['TIMEOUT → resend' + (L.key === 'adaptive' || L.key === 'ewma' ? ', RTO ×2' : ''), C['--warn']]);
+      if (down) {
+        ctx.save(); ctx.strokeStyle = C['--bad']; ctx.setLineDash([6, 5]); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(wL, mid); ctx.lineTo(wR, mid); ctx.stroke(); ctx.restore();
+        status.push([`LINK DOWN until ${outage[1]} s`, C['--bad']]);
+      } else if (P.scenario === 'congestion' && !L.done) {
+        const ph = L.net.params(L.i);
+        if (ph[1] > P.baseRttMs / 1000 * 1.5) status.push(['CONGESTED · RTT ×3', C['--warn']]);
+      }
+      ctx.save(); ctx.font = '600 11px ' + mono;
+      let sxr = W - 12;
+      for (const [s, c] of status.reverse()) {
+        txt(s, sxr, y0 + 19, { font: '600 11px ' + mono, color: c, align: 'right' });
+        sxr -= ctx.measureText(s).width + 16;
+      }
+      ctx.restore();
+      // packets
+      const span = wR - wL - CAPW - 8;
+      for (const t of (L.done ? [] : L.vis)) {
+        const half = t.rtt / 2;
+        if (T < t.t0) continue;
+        const reqKind = t.attempt > 1 ? 'rs' : 'req';
+        const fReq = (T - t.t0) / half;
+        if (t.lost && t.leg === 'req') {
+          if (fReq < t.lossFrac) capsule(wL + 4 + fReq * span, reqY, 'REQ ' + t.req, reqKind, col);
+          else { const lossT = t.t0 + t.lossFrac * half, age = T - lossT, life = Math.max(half, 0.12);
+            if (age < life) xmark(wL + 4 + t.lossFrac * span + CAPW / 2, reqY, 1 - age / life); }
+          continue;
+        }
+        if (fReq < 1) capsule(wL + 4 + fReq * span, reqY, 'REQ ' + t.req, reqKind, col);
+        if (T < t.srvAt) continue;
+        const fAck = (T - t.srvAt) / half;
+        const ackX = f => wR - 4 - CAPW - f * span;
+        if (t.lost && t.leg === 'ack') {
+          if (fAck < t.lossFrac) capsule(ackX(fAck), ackY, 'ACK ' + t.req, 'ack', col);
+          else { const lossT = t.srvAt + t.lossFrac * half, age = T - lossT, life = Math.max(half, 0.12);
+            if (age < life) xmark(ackX(t.lossFrac) + CAPW / 2, ackY, 1 - age / life); }
+        } else if (fAck < 1) {
+          capsule(ackX(fAck), ackY, 'ACK ' + t.req, t.dup ? 'dup' : 'ack', col);
+        }
+      }
+      // server flash when a request arrives, client flash when an ACK is accepted
+      const flash = Math.max(0.04, 0.12 * speed / 1);
+      const srvHit = !L.done && L.vis.some(t => !(t.lost && t.leg === 'req') && T >= t.srvAt && T - t.srvAt < Math.min(flash, t.rtt / 2));
+      const cliHit = !L.done && L.vis.some(t => t.accepted && T >= t.ackAt && T - t.ackAt < Math.min(flash, 0.3));
+      for (const [x, label, hit, hitCol] of [[cX, 'Client', cliHit, C['--good']], [sX, 'Server', srvHit, col]]) {
+        rr(x, mid - nodeH / 2, nodeW, nodeH, 8);
+        ctx.fillStyle = C['--node']; ctx.fill();
+        ctx.lineWidth = hit ? 2.5 : 1.2; ctx.strokeStyle = hit ? hitCol : C['--border']; ctx.stroke();
+        txt(label, x + nodeW / 2, mid + 1, { font: '600 12px ' + sans, align: 'center', base: 'middle' });
+      }
+      // timer bar under the client
+      const barY = mid + nodeH / 2 + 9;
+      ctx.fillStyle = C['--surface-2']; rr(cX, barY, nodeW, 6, 3); ctx.fill();
+      if (!L.done && isFinite(L.deadline)) {
+        const left = Math.max(0, L.deadline - T), frac = Math.min(1, left / L.curRto);
+        ctx.fillStyle = col; rr(cX, barY, Math.max(3, nodeW * frac), 6, 3); ctx.fill();
+        txt(`timer ${Math.round(left * 1000)} ms`, cX + nodeW + 8, barY + 6, { font: '11px ' + mono, color: C['--text-3'] });
+      }
+      if (L.done) {
+        const s = L.summary();
+        txt(`All ${L.n} requests done in ${fmt(s.totalTimeS, 1)} s · ${s.retransmissions} retransmissions`, (wL + wR) / 2, mid + 4,
+          { font: '600 12px ' + sans, color: C['--good'], align: 'center', base: 'middle' });
+      }
+    });
+  }
+
+  /* ---------- live panels (throttled) ---------- */
+  function updateUi() {
+    if (!lanes.length) return;
+    $('#clock').textContent = fmt(T, 2) + ' s';
+    const doneReq = lanes.map(l => l.lat.length), n = P.n;
+    $('#progressBar').style.width = (100 * doneReq.reduce((a, b) => a + b, 0) / (n * lanes.length)) + '%';
+    const lo = Math.min(...doneReq), hi = Math.max(...doneReq);
+    $('#doneCount').textContent = `${lo === hi ? lo : lo + '–' + hi} of ${n} requests done`;
+    const S = lanes.map(l => ({ l, s: l.summary() }));
+    $('#scoreNote').textContent = finished ? '(final)' : '(so far, updates live)';
+    scorecard($('#scorecard'), S.map(({ l, s }) => ({ key: l.key, name: l.name, values: {
+      mean: s.meanLatencyMs, p95: s.p95LatencyMs, spur: s.spuriousPer100, rtx: s.retransmissions,
+      eff: 100 * s.efficiency, total: s.totalTimeS } })), [
+      { id: 'mean', label: 'Mean latency', better: 'low', fmt: ms },
+      { id: 'p95', label: '95th pct latency', better: 'low', fmt: ms },
+      { id: 'spur', label: 'Spurious / 100 req', better: 'low', fmt: v => fmt(v, 1) },
+      { id: 'rtx', label: 'Retransmissions', better: 'low', fmt: v => fmt(v) },
+      { id: 'eff', label: 'Efficiency', better: 'high', fmt: v => fmt(v, 1) + ' %' },
+      { id: 'total', label: 'Time so far', better: 'low', fmt: v => fmt(v, 1) + ' s' },
+    ]);
+    if (finished) $('#scorecard tr th:last-child').textContent = 'Total time';
+    drawRtoPanels();
+    drawSends();
+    drawLog();
+    $('#insight').innerHTML = finished ? finalInsight(S) : runningInsight();
+  }
+  function drawRtoPanels() {
+    const box = $('#rtoPanels');
+    if (box.children.length !== lanes.length) { box.innerHTML = ''; lanes.forEach(() => box.appendChild(document.createElement('div'))); }
+    const allRtt = lanes.flatMap(l => l.rtt.map(v => v == null ? null : v * 1000));
+    const allRto = lanes.flatMap(l => l.rto.map(v => v * 1000));
+    let yMax = Math.max(pct(allRtt, 0.995) * 1.6, pct(allRto, 0.75) * 1.25, 50);
+    const step = yMax > 2000 ? 500 : yMax > 600 ? 200 : 50;
+    yMax = Math.ceil(yMax / step) * step;
+    lanes.forEach((l, k) => {
+      const el = box.children[k];
+      if (el.matches(':hover') && !finished) return;          // keep the tooltip steady
+      let bands = [];
+      if (P.scenario === 'congestion') bands = [{ x0: Math.floor(P.n / 3), x1: Math.floor(2 * P.n / 3), label: 'congestion' }];
+      if (P.scenario === 'outage' && l.net.outage) {
+        let a = null, b = null;
+        l.tstart.forEach((t, i) => { if (t >= l.net.outage[0] && a == null) a = i; if (t < l.net.outage[1]) b = i; });
+        if (a == null && !l.done && T >= l.net.outage[0]) { a = l.lat.length; b = l.lat.length; }
+        if (a != null) bands = [{ x0: a - 0.5, x1: Math.max(a + 0.5, b + 0.5), label: 'outage' }];
+      }
+      Charts.line(el, {
+        title: l.name, height: 220, legend: false,
+        x: { label: 'Request number', min: 0, max: P.n - 1 }, y: { label: 'ms', min: 0, max: yMax },
+        bands,
+        series: [
+          { name: 'RTT sample', kind: 'scatter', color: 'var(--rtt)', r: 1.7, data: l.rtt.map((v, i) => [i, v == null ? null : v * 1000]) },
+          { name: 'RTO', color: COLOR(l.key), dash: DASH[l.key], width: 1.8, data: l.rto.map((v, i) => [i, v * 1000]) },
+        ],
+        tipX: x => 'Request #' + x, tipY: v => ms(v),
+      });
+    });
+  }
+  function drawSends() {
+    const el = $('#sendsChart');
+    if (el.matches(':hover') && !finished) return;
+    const series = lanes.map(l => ({ name: l.name, color: COLOR(l.key), dash: DASH[l.key], kind: 'step',
+      data: thin(l.sends.filter(t => t <= T).map((t, i) => [t, i + 1]), 900) }));
+    const bands = P.scenario === 'outage' ? [{ x0: 5, x1: 15, label: 'outage' }] : [];
+    Charts.line(el, {
+      title: 'Packets sent over time', subtitle: 'Every transmission, including retransmissions. A steeper line means more traffic on the network.',
+      height: 250, x: { label: 'Simulated time (s)', min: 0, max: Math.max(1, T) }, y: { label: 'Cumulative packets', min: 0 },
+      bands, series, tipX: x => 't = ' + fmt(x, 2) + ' s', tipY: v => fmt(v) + ' packets',
+    });
+  }
+  function drawLog() {
+    const l = lanes.find(x => x.key === $('#logLane').value) || lanes[0];
+    const ev = l.events.filter(e => e.t <= T + 1e-9).sort((a, b) => a.t - b.t).slice(-10).reverse();
+    const label = { send: 'sent', resend: 'resent', lost: 'lost', ack: 'ack', timeout: 'timeout', fail: 'failed', done: 'done' };
+    $('#log').innerHTML = ev.length ? ev.map(e => `<tr><td class="t">${fmt(e.t, 3)} s</td><td class="k"><span class="tag ${e.type}">${label[e.type] || e.type}</span></td><td>${esc(e.text)}</td></tr>`).join('')
+      : '<tr><td class="muted">No events yet.</td></tr>';
+  }
+  function runningInsight() {
+    const sp = speed < 1 ? `Slow motion (${speed}×): watch each request travel to the server and its ACK come back.` : `Running at ${speed}× speed.`;
+    return `${sp} Press <b>5×</b> or <b>25×</b> to fill the graphs faster, or <b>Skip to end</b> for the final result. <span class="small muted">Shortcut: <span class="kbd">Space</span> pauses.</span>`;
+  }
+  function finalInsight(S) {
+    const n = P.n, by = k => S.find(x => x.l.key === k);
+    const A = by('adaptive');
+    const fastest = S.reduce((a, b) => a.s.meanLatencyMs <= b.s.meanLatencyMs ? a : b);
+    const leanest = S.reduce((a, b) => a.s.spuriousPer100 <= b.s.spuriousPer100 ? a : b);
+    let t = `<b>Finished.</b> Adaptive: ${ms(A.s.meanLatencyMs)} mean latency, ${fmt(A.s.spuriousPer100, 1)} spurious per 100 requests, ${fmt(100 * A.s.efficiency, 1)} % efficiency. `;
+    if (fastest.l.key !== 'adaptive') {
+      const r = fastest.s.spuriousPer100 / Math.max(A.s.spuriousPer100, 0.1);
+      t += `${esc(fastest.l.name)} is ${fmt(A.s.meanLatencyMs - fastest.s.meanLatencyMs)} ms faster` +
+        (r >= 2 ? `, but sends ${fmt(r, r < 10 ? 1 : 0)}× as many unnecessary copies (${fmt(fastest.s.spuriousPer100, 1)} per 100).` : '.');
+    } else t += 'It has the lowest mean latency of the four.';
+    if (leanest.l.key !== 'adaptive' && leanest.l.key !== fastest.l.key) {
+      const dl = leanest.s.meanLatencyMs - A.s.meanLatencyMs;
+      if (dl > 0) t += ` ${esc(leanest.l.name)} wastes fewer packets but is ${fmt(dl)} ms slower on average.`;
+    }
+    if (P.scenario === 'outage') {
+      const inOut = S.map(({ l }) => `${esc(l.name)} ${l.sends.filter(x => x >= 5 && x < 15).length}`).join(', ');
+      t += ` Packets sent into the dead link: ${inOut}.`;
+    }
+    return t;
+  }
+
+  /* ---------- controls ---------- */
+  function initLive() {
+    $$('#scenario button').forEach(b => b.addEventListener('click', () => {
+      $$('#scenario button').forEach(x => x.classList.toggle('on', x === b)); rebuild();
+    }));
+    const deb = debounce(rebuild, 250);
+    ['#base', '#jit', '#loss', '#n', '#seed'].forEach(s => $(s).addEventListener('input', () => { labels(); deb(); }));
+    ['#fs', '#fl', '#spikes'].forEach(s => $(s).addEventListener('change', rebuild));
+    $('#resetDefaults').addEventListener('click', () => {
+      const D = DEFAULTS;
+      $$('#scenario button').forEach(x => x.classList.toggle('on', x.dataset.v === D.scenario));
+      $('#base').value = D.base; $('#jit').value = D.jit; $('#loss').value = D.loss; $('#n').value = D.n;
+      $('#seed').value = D.seed; $('#fs').value = D.fs; $('#fl').value = D.fl; $('#spikes').checked = D.spikes;
+      rebuild();
+    });
+    $$('#speedSeg button').forEach(b => {
+      b.classList.toggle('on', +b.dataset.v === speed);
+      b.addEventListener('click', () => {
+        speed = +b.dataset.v; store.set('atl-speed', speed);
+        $$('#speedSeg button').forEach(x => x.classList.toggle('on', x === b));
+        if (!finished) $('#insight').innerHTML = runningInsight();
+      });
+    });
+    $('#playBtn').addEventListener('click', togglePlay);
+    $('#restartBtn').addEventListener('click', () => rebuild());
+    $('#skipBtn').addEventListener('click', () => {
+      for (const l of lanes) l.advance(Infinity);
+      T = endTime(); finished = true; playing = false; $('#playBtn').textContent = 'Replay';
+      updateUi(); draw();
+    });
+    $('#logLane').addEventListener('change', drawLog);
+    document.addEventListener('keydown', e => {
+      if (e.code !== 'Space' || /INPUT|SELECT|TEXTAREA|BUTTON/.test(document.activeElement.tagName)) return;
+      if (!$('#view-live').classList.contains('on')) return;
+      e.preventDefault(); togglePlay();
+    });
+    rebuild();
+  }
+  function togglePlay() {
+    if (finished) { rebuild(); return; }
+    setPlaying(!playing);
+  }
+
+  /* =================== EXPERIMENTS =================== */
+  const METRICS = {
+    latencyOverhead: { label: 'Latency ÷ base RTT', axis: 'Mean latency ÷ base RTT (1 = ideal)', fmt: v => fmt(v, 2) + '×', log: true },
+    efficiencyPct: { label: 'Efficiency', axis: 'Transmission efficiency (%)', fmt: v => fmt(v, 1) + ' %' },
+    meanLatencyMs: { label: 'Mean latency', axis: 'Mean latency (ms)', fmt: ms },
+    p95LatencyMs: { label: '95th pct latency', axis: '95th-percentile latency (ms)', fmt: ms },
+    spuriousPer100: { label: 'Spurious retx', axis: 'Spurious retransmissions per 100 requests', fmt: v => fmt(v, 1) },
+  };
+  const EXP_METRICS = {
+    network: ['latencyOverhead', 'efficiencyPct', 'meanLatencyMs'],
+    loss: ['meanLatencyMs', 'p95LatencyMs', 'efficiencyPct', 'spuriousPer100'],
+    jitter: ['spuriousPer100', 'p95LatencyMs', 'meanLatencyMs', 'efficiencyPct'],
+  };
+  let expKind = 'network', expMetric = null, expData = null, expSeq = 0;
+  const hiddenKeys = new Set();
+  function runExp() {
+    const my = ++expSeq;
+    $('#expInsight').innerHTML = '<span class="spinner"></span> Running…';
+    $('#outageCtl').hidden = expKind !== 'outage';
+    $('#explorer').hidden = expKind !== 'network';
+    $('#v_seeds').textContent = $('#seeds').value;
+    $('#v_olen').textContent = $('#olen').value + ' s';
+    setTimeout(() => {
+      if (my !== expSeq) return;
+      try {
+        const fx = { seeds: +$('#seeds').value, fixedShortMs: Math.max(10, +$('#efs').value || 200), fixedLongMs: Math.max(10, +$('#efl').value || 1000) };
+        expData = ATL.sweep(expKind, Object.assign({ outageLen: +$('#olen').value }, fx));
+        if (expKind === 'network' && window.Explorer) { Explorer.setData(expData, fx); Explorer.wake(); }
+        renderExp();
+      } catch (e) { $('#expInsight').textContent = 'Something went wrong: ' + e.message; }
+    }, 30);
+  }
+  function metricSeg(list) {
+    const seg = $('#metricSeg');
+    if (!list) { seg.hidden = true; return; }
+    seg.hidden = false;
+    if (!list.includes(expMetric)) expMetric = list[0];
+    seg.innerHTML = list.map(m => `<button type="button" data-m="${m}" class="${m === expMetric ? 'on' : ''}">${METRICS[m].label}</button>`).join('');
+    seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { expMetric = b.dataset.m; renderExp(); }));
+  }
+  function renderExp() {
+    const d = expData, c2 = $('#expChart2'); c2.innerHTML = ''; c2._chartOpts = null;
+    seriesChips(d.kind === 'outage' || d.kind === 'fixed' ? null : d.series);
+    if (d.kind === 'outage') {
+      metricSeg(null);
+      Charts.line($('#expChart'), {
+        title: 'Packets sent through a link outage', subtitle: 'Cumulative transmissions. The shaded band is the outage, when every packet is lost.',
+        height: 340, x: { label: 'Simulated time (s)', min: 0, max: Math.max(30, d.outage[1] + 15) }, y: { label: 'Cumulative packets' },
+        bands: [{ x0: d.outage[0], x1: d.outage[1], label: `outage (${fmt(d.outage[1] - d.outage[0])} s)` }],
+        series: d.series.map((s, i) => ({ name: `${s.name}: ${s.inOutage} packets into the dead link`, color: i ? 'var(--s2)' : 'var(--s1)', dash: i ? '8 5' : null, kind: 'step',
+          data: s.sends.map((t, j) => [t, j + 1]) })),
+        tipX: x => 't = ' + fmt(x, 2) + ' s', tipY: v => fmt(v) + ' packets',
+      });
+      const [a, b] = d.series;
+      $('#expInsight').innerHTML = `<b>Back-off protects the network.</b> With exponential back-off the client sent <b>${a.inOutage}</b> packets into the dead link; without it, <b>${b.inOutage}</b>. The cost is a slower restart once the link returns.`;
+      return;
+    }
+    if (d.kind === 'fixed') {
+      metricSeg(null);
+      const A = d.adaptive;
+      const mk = (m, title, sub) => ({
+        title, subtitle: sub, height: 260,
+        x: { type: 'log', label: 'Fixed timeout value (ms, log scale)', min: 90, max: 2200, ticks: d.x.map(v => ({ v, label: v >= 1000 ? v / 1000 + ' s' : String(v) })) },
+        y: { label: METRICS[m].axis, min: 0 },
+        hlines: [{ y: A[m], label: `Adaptive: ${METRICS[m].fmt(A[m])}`, color: 'var(--s1)', dash: '7 5', width: 2 }],
+        series: [{ name: 'Fixed timeout', color: 'var(--s3)', markers: true, data: d.x.map((x, i) => [x, d.fixed[i][m]]) }],
+        tipX: x => 'Fixed ' + (x >= 1000 ? x / 1000 + ' s' : x + ' ms'), tipY: v => METRICS[m].fmt(v),
+      });
+      Charts.line($('#expChart'), mk('meanLatencyMs', 'Mean latency', 'Shorter fixed timeouts recover from loss faster…'));
+      Charts.line(c2, mk('spuriousPer100', 'Unnecessary retransmissions', '…but below the congested RTT they resend packets that were never lost.'));
+      const best = d.fixed.reduce((a, b, i) => b.meanLatencyMs < d.fixed[a].meanLatencyMs ? i : a, 0);
+      $('#expInsight').innerHTML = `<b>No single fixed value wins both.</b> The fastest fixed timeout (${d.x[best]} ms, ${ms(d.fixed[best].meanLatencyMs)}) sends ${fmt(d.fixed[best].spuriousPer100, 0)} unnecessary copies per 100 requests. Adaptive gets ${ms(A.meanLatencyMs)} with only ${fmt(A.spuriousPer100, 1)}, without being tuned.`;
+      return;
+    }
+    metricSeg(EXP_METRICS[d.kind]);
+    const M = METRICS[expMetric], cat = d.kind === 'network';
+    const xs = cat ? d.x.map((_, i) => i) : d.x;
+    const shown = d.series.filter(s => !hiddenKeys.has(s.key));
+    const el = $('#expChart');
+    if (!shown.length) {
+      el._chartOpts = null;
+      el.innerHTML = `<div class="empty-state"><div class="empty-ic" aria-hidden="true">∅</div><b>No strategies selected</b><p>Every timer is hidden, so there is nothing to plot. Turn one back on above, or</p><button type="button" class="btn" id="showAll">Show all four</button></div>`;
+      $('#showAll').addEventListener('click', () => { hiddenKeys.clear(); renderExp(); });
+      $('#expInsight').innerHTML = expInsight(d);
+      return;
+    }
+    const sel = cat && window.Explorer ? Explorer.selected().net : -1;
+    const titles = { network: 'One timeout policy, six networks (5 % loss)', loss: 'Steady 120 ms path, rising packet loss', jitter: 'Mean RTT 150 ms, rising jitter (2 % loss)' };
+    Charts.line($('#expChart'), {
+      title: titles[d.kind], height: 360,
+      x: cat ? { label: 'Network (base RTT)', min: -0.3, max: xs.length - 0.7, ticks: d.xlabels.map((l, i) => ({ v: i, label: l })) }
+        : { label: d.kind === 'loss' ? 'Packet loss (%)' : 'RTT jitter, std-dev (ms)', ticks: d.x.map(v => ({ v })) },
+      y: { label: M.axis, type: M.log ? 'log' : 'linear', min: M.log ? 0.9 : undefined },
+      hlines: expMetric === 'latencyOverhead' ? [{ y: 1, label: 'ideal', dash: '2 4' }] : [],
+      bands: sel >= 0 ? [{ x0: sel - 0.32, x1: sel + 0.32, label: 'in the explorer' }] : [],
+      series: shown.map(s => ({ name: s.name, color: COLOR(s.key), dash: DASH[s.key], markers: true, data: xs.map((x, i) => [x, s.values[i][expMetric]]) })),
+      tipX: x => cat ? `${d.xlabels[x]} (${d.x[x]} ms)` : d.xlabels[d.x.indexOf(x)], tipY: v => M.fmt(v),
+    });
+    $('#expInsight').innerHTML = expInsight(d);
+  }
+  function seriesChips(series) {
+    const box = $('#seriesChips');
+    if (!series) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = '<span class="small muted">Show</span>' + series.map(s => {
+      const on = !hiddenKeys.has(s.key);
+      return `<button type="button" class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-k="${s.key}" style="--c:${COLOR(s.key)}"><i></i>${esc(s.name)}</button>`;
+    }).join('');
+    box.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.k; hiddenKeys.has(k) ? hiddenKeys.delete(k) : hiddenKeys.add(k); renderExp();
+    }));
+  }
+  function expInsight(d) {
+    const g = (k, m) => d.series.find(s => s.key === k).values.map(v => v[m]);
+    const name = k => esc(d.series.find(s => s.key === k).name);
+    if (d.kind === 'network') {
+      const ov = g('adaptive', 'latencyOverhead'), ef = g('adaptive', 'efficiencyPct');
+      return `<b>The adaptive timer works on every network:</b> ${fmt(Math.min(...ov), 2)}–${fmt(Math.max(...ov), 2)}× the ideal latency and ${fmt(Math.min(...ef), 0)}–${fmt(Math.max(...ef), 0)} % efficiency from LAN to satellite. ` +
+        `${name('long')} is ${fmt(g('long', 'latencyOverhead')[0], 1)}× slower than ideal on the LAN; ${name('short')} falls to ${fmt(g('short', 'efficiencyPct').at(-1), 0)} % efficiency on the satellite link.`;
+    }
+    if (d.kind === 'jitter') {
+      return `<b>Tracking variance keeps false timeouts low.</b> At ${d.xlabels.at(-1)} jitter the mean-only EWMA timer fires falsely on ${fmt(g('ewma', 'spuriousPer100').at(-1), 1)} of every 100 requests; adaptive on ${fmt(g('adaptive', 'spuriousPer100').at(-1), 1)}, because its RTO widens with RTTVAR.`;
+    }
+    const i10 = d.x.indexOf(10);
+    return `<b>On a steady path that suits it, a short fixed timer is fastest.</b> At 10 % loss: ${name('short')} ${ms(g('short', 'meanLatencyMs')[i10])}, adaptive ${ms(g('adaptive', 'meanLatencyMs')[i10])}, ${name('long')} ${ms(g('long', 'meanLatencyMs')[i10])}. ` +
+      `Above about 20 % loss, back-off makes adaptive slower: the price for not flooding a lossy path.`;
+  }
+  function initExp() {
+    if (window.Explorer) Explorer.init({ onChange: () => { if (expKind === 'network' && expData && expData.kind === 'network') renderExp(); } });
+    $$('#expList button').forEach(b => b.addEventListener('click', () => {
+      $$('#expList button').forEach(x => x.classList.toggle('on', x === b));
+      expKind = b.dataset.k; expMetric = null; runExp();
+    }));
+    const deb = debounce(runExp, 250);
+    $('#seeds').addEventListener('input', () => { $('#v_seeds').textContent = $('#seeds').value; deb(); });
+    $('#olen').addEventListener('input', () => { $('#v_olen').textContent = $('#olen').value + ' s'; deb(); });
+    ['#efs', '#efl'].forEach(s => $(s).addEventListener('change', runExp));
+    runExp();
+  }
+
+  /* ---------------- start ---------------- */
+  initLive();
+  showView(location.hash.slice(1) || 'live');
+})();
+
+</script>
+</body>
+</html>
